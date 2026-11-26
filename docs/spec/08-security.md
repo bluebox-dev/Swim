@@ -1,43 +1,45 @@
 # 08 · Security
 
-> SWIM = ระบบที่ **ล้างเครื่องและรันโค้ดระดับ SYSTEM ได้ทุกเครื่องในองค์กร** → ต้องถือเป็น Tier-0 asset เทียบเท่า Domain Controller
+**English** · [ไทย](08-security.th.md)
 
-## 1. Threat Model
+> SWIM is a system that **can wipe every machine in the organisation and run code as SYSTEM on it** → it must be treated as a Tier-0 asset, on a par with a domain controller.
 
-| ภัย | ผลกระทบ | มาตรการ |
+## 1. Threat model
+
+| Threat | Impact | Measures |
 |---|---|---|
-| ยึด Server ได้ | ล้างทุกเครื่อง / ฝัง malware ใน image | manifest/release เซ็นด้วยกุญแจแยก (§3), approve 2 คน, image ต้องผ่าน test, audit แบบแก้ไม่ได้, kill switch |
-| ยึดบัญชี admin | สั่ง deploy/rollout อันตราย | SSO + MFA, RBAC, approve 2 คนสำหรับ publish/global actions |
-| MITM / DNS spoof | ส่ง image ปลอม | mTLS + pin CA ภายใน + ตรวจลายเซ็น chunks.json |
-| ปลอมเป็น agent | ขโมย ODJ blob / ข้อมูล inventory | client cert ต่อเครื่อง (TPM-backed ถ้ามี), secrets seal ไปยังกุญแจของเครื่อง |
-| ผู้ใช้ local admin บนเครื่องลูก | สั่ง deploy เอง / แก้ไฟล์บน S: | local deploy ใช้ได้เฉพาะ manifest ที่เซ็น; ไฟล์บน S: ตรวจ hash/ลายเซ็นทุกครั้ง |
-| ถอดดิสก์ไปอ่าน S: | ได้ ODJ blob | blob อายุสั้น + ใช้ครั้งเดียว + TPM seal (v2) |
-| Agent update ปลอม | ยึดทั้ง fleet | Authenticode + Ed25519 release key ที่ **อยู่นอก server** |
-| Supply chain (dependency) | backdoor ใน binary | pin go.sum, `govulncheck` ใน CI, reproducible build, SBOM |
+| Server takeover | wipe every machine / plant malware in an image | manifests and releases signed with separate keys (§3), two-person approval, images must pass tests, tamper-evident audit, kill switch |
+| Admin account takeover | dangerous deploys / rollouts | SSO + MFA, RBAC, two-person approval for publish and global actions |
+| MITM / DNS spoofing | a forged image is delivered | mTLS + pinned internal CA + signature check of chunks.json |
+| Agent impersonation | steal the ODJ blob / inventory data | per-machine client certificate (TPM-backed when available), secrets sealed to the machine's key |
+| A local administrator on a client | starts a deploy / edits files on S: | local deploys work only with a signed manifest; files on S: are verified by hash / signature every time |
+| A disk removed to read S: | obtains the ODJ blob | short-lived, single-use blob + TPM sealing (v2) |
+| Forged agent update | takeover of the whole fleet | Authenticode + an Ed25519 release key that is **kept off the server** |
+| Supply chain (dependencies) | a backdoor in the binary | pinned go.sum, `govulncheck` in CI, reproducible builds, SBOM |
 
-## 2. PKI และใบรับรอง
+## 2. PKI and certificates
 
-| ใบ/กุญแจ | ที่เก็บ | อายุ | ใช้ทำ |
+| Certificate / key | Kept in | Lifetime | Used for |
 |---|---|---|---|
-| **Root CA** | offline (USB/HSM ในตู้เซฟ) | 10 ปี | เซ็น Intermediate |
-| **Intermediate CA** | Server — `step-ca` container (หรือ ADCS ขององค์กร) | 2 ปี | ออก TLS server + mTLS client cert |
-| TLS server cert | nginx | 90 วัน auto-renew (ACME จาก step-ca) | HTTPS |
-| Agent client cert | เครื่องลูก (TPM/DPAPI) | 90 วัน auto-renew ที่ 2/3 อายุ | mTLS |
-| Utility VM client cert | Utility VM | 90 วัน | mTLS |
+| **Root CA** | offline (USB / HSM in a safe) | 10 years | signs the intermediate |
+| **Intermediate CA** | server — `step-ca` container (or the organisation's ADCS) | 2 years | issues the TLS server and mTLS client certificates |
+| TLS server certificate | nginx | 90 days, auto-renewed (ACME from step-ca) | HTTPS |
+| Agent client certificate | client (TPM / DPAPI) | 90 days, auto-renewed at 2/3 of its life | mTLS |
+| Utility VM client certificate | Utility VM | 90 days | mTLS |
 
-- agent **pin** Intermediate/Root ของ SWIM (ไม่เชื่อ CA สาธารณะสำหรับ API ของ SWIM)
-- แจ้งเตือนใบที่จะหมดอายุ ≤ 30 วัน ทุกใบใน Dashboard (Operations)
+- The agent **pins** SWIM's intermediate / root (it does not trust public CAs for the SWIM API)
+- Every certificate expiring within 30 days raises an alert on the dashboard (Operations)
 
-## 3. กุญแจเซ็น (Signing Keys)
+## 3. Signing keys
 
-| กุญแจ | ที่เก็บ | เซ็นอะไร | หมุนเวียน |
+| Key | Kept in | Signs | Rotation |
 |---|---|---|---|
-| **Root release key** (Ed25519) | offline 2 ชุด (2 คนถือ) | keyset | เมื่อจำเป็นเท่านั้น |
-| **Release key** (Ed25519) | hardware token ของ CI (YubiKey/HSM) — **ไม่อยู่บน SWIM server** | `release.json`, rollback directive | ทุก 1 ปี |
-| **Manifest key** (Ed25519) | `signer` service แยก container บน server, กุญแจเข้ารหัสด้วย KEK จาก TPM ของ host (หรือ YubiHSM) | manifest, chunks.json, config, go-token | ทุก 6 เดือน |
-| **Code signing** (Authenticode) | hardware token | `.exe`, `.msi` | ตามใบ |
+| **Root release key** (Ed25519) | offline, 2 copies (held by 2 people) | the keyset | only when necessary |
+| **Release key** (Ed25519) | the CI's hardware token (YubiKey / HSM) — **not on the SWIM server** | `release.json`, rollback directives | yearly |
+| **Manifest key** (Ed25519) | a separate `signer` container on the server, encrypted with a KEK from the host's TPM (or a YubiHSM) | manifests, chunks.json, config, go-tokens | every 6 months |
+| **Code signing** (Authenticode) | hardware token | `.exe`, `.msi` | per certificate |
 
-### Keyset และการหมุนกุญแจ
+### Keyset and key rotation
 
 ```json
 { "schema": 1, "issued_at": "...", "keys": [
@@ -47,62 +49,62 @@
   "sig": "<root release key>" }
 ```
 
-- เครื่องลูกเชื่อ key ตาม keyset ล่าสุดที่ตรวจด้วย root release key (pubkey ของ root ฝังใน binary)
-- หมุน: เพิ่ม key ใหม่ใน keyset → รอ ≥ 95% ของ fleet ได้ keyset ใหม่ → เริ่มเซ็นด้วย key ใหม่ → ถอด key เก่า
-- กุญแจรั่ว: ออก keyset ใหม่ที่ถอด key นั้น + global kill switch จนกว่า fleet จะได้ keyset ใหม่
+- Clients trust keys per the latest keyset verified with the root release key (the root's public key is embedded in the binary)
+- Rotation: add the new key to the keyset → wait until ≥ 95% of the fleet has the new keyset → start signing with the new key → remove the old key
+- Key compromise: issue a new keyset without that key + global kill switch until the fleet has the new keyset
 
 ## 4. RBAC
 
-| Role | ทำได้ |
+| Role | May |
 |---|---|
-| `viewer` | ดู dashboard, host, job, log สรุป |
-| `technician` | สั่ง job รายเครื่อง (stage/deploy/rollback/cancel/collect_logs) เฉพาะ site ที่ได้รับ, ดู log เต็ม |
-| `image_builder` | ใช้ Builder, build/test image, จัดการ driver pack |
-| `approver` | approve/reject image และ WinPE (**ห้ามเป็นคนเดียวกับผู้ build รุ่นนั้น**) |
-| `release_manager` | สร้าง/คุม rollout, kill switch, fleet rollback, ปล่อย agent release |
-| `admin` | user/role, site, enrollment token, policy, keyset ceremony |
+| `viewer` | see dashboards, hosts, jobs, summary logs |
+| `technician` | run per-machine jobs (stage / deploy / rollback / cancel / collect_logs) in assigned sites only, see full logs |
+| `image_builder` | use the Builder, build / test images, manage driver packs |
+| `approver` | approve / reject images and WinPE (**never the person who built that release**) |
+| `release_manager` | create and control rollouts, kill switch, fleet rollback, release agents |
+| `admin` | users / roles, sites, enrollment tokens, policy, keyset ceremony |
 
-- Admin login: **SSO (OIDC/SAML) หรือ LDAP + MFA บังคับ**
-- การกระทำที่ต้อง 2 คน: publish image, global kill switch (ปลด), fleet rollback > 50 เครื่อง, ปล่อย agent release ไป canary, หมุนกุญแจ
+- Admin login: **SSO (OIDC / SAML) or LDAP, with mandatory MFA**
+- Two-person actions: publishing an image, clearing a global kill switch, fleet rollback of > 50 machines, releasing an agent to canary, key rotation
 
-## 5. ความลับ (Secrets)
+## 5. Secrets
 
-### ODJ blob (มีรหัสผ่านบัญชีเครื่อง)
+### ODJ blob (contains the machine account password)
 
-| ขั้น | v1 (Phase 1–3) | v2 (Phase 4+) |
+| Step | v1 (Phases 1–3) | v2 (Phase 4+) |
 |---|---|---|
-| สร้าง | Utility VM ตอน handoff ขอ (ไม่สร้างล่วงหน้า) | เหมือนเดิม |
-| ส่ง | sealed box ไปยัง `x25519_pub` ของเครื่อง | เหมือนเดิม |
-| ส่งต่อให้ WinPE | agent เปิดซอง → เขียน `S:\swim\jobs\<id>\odj.bin` **ทันทีก่อนรีบูต** | agent เปิดซอง → **seal ด้วย TPM** (ไม่ผูก PCR) → WinPE unseal ด้วย TPM เดียวกัน |
-| หลังใช้ | WinPE เขียนทับด้วยศูนย์แล้วลบ | เหมือนเดิม |
-| ถ้า job ไม่สำเร็จ/หมดอายุ 24 ชม. | server สั่ง Utility VM reset รหัสบัญชีเครื่อง (blob เดิมใช้ไม่ได้) | เหมือนเดิม |
+| Creation | by the Utility VM when handoff requests it (never in advance) | same |
+| Transport | sealed box to the machine's `x25519_pub` | same |
+| Passing to WinPE | the agent opens the envelope → writes `S:\swim\jobs\<id>\odj.bin` **right before the reboot** | the agent opens the envelope → **seals with the TPM** (not PCR-bound) → WinPE unseals with the same TPM |
+| After use | WinPE overwrites it with zeros and deletes it | same |
+| If the job fails / expires after 24 hours | the server tells the Utility VM to reset the machine account password (the old blob is useless) | same |
 
-> v1 คือข้อยกเว้นของหลัก "ไม่มีความลับบนดิสก์" ที่ยอมรับชั่วคราว — ช่วงเสี่ยงคือระหว่าง handoff ถึง apply (ไม่กี่นาที) และ blob ใช้ได้แค่บัญชีเครื่องเดียว
+> v1 is a temporarily accepted exception to "no secrets on disk" — the exposure window is between handoff and apply (a few minutes) and the blob is good for a single machine account only.
 
-### อื่น ๆ
-- รหัสผ่าน local admin: **ไม่มีใน unattend** — ใช้ Windows LAPS
-- ความลับฝั่ง server (DB password, guacamole, SSO client secret): docker secrets / ไฟล์ที่ `chmod 600` + เข้ารหัสใน backup
-- บัญชี djoin บน Utility VM: บัญชีเฉพาะ, สิทธิ์สร้าง/รีเซ็ตเฉพาะ OU เครื่องลูก, อยู่ใน allowlist ของ policy "Allow computer account re-use during domain join"
+### Other
+- Local admin password: **not in the unattend file** — Windows LAPS is used
+- Server-side secrets (DB password, Guacamole, SSO client secret): docker secrets / files with `chmod 600` + encrypted in backups
+- The djoin account on the Utility VM: a dedicated account allowed to create / reset only in the client OU, listed in the policy "Allow computer account re-use during domain join"
 
-## 6. Audit Log
+## 6. Audit log
 
-- ตาราง `audit_log` แบบ **append-only** (สิทธิ์ DB: INSERT อย่างเดียวสำหรับ app user) + hash chain (`prev_hash`) เพื่อตรวจการแก้ไข
-- ส่งสำเนาไป syslog/SIEM ขององค์กรแบบ real-time
-- เก็บ: ใคร (user / local:user / system / rollout), ทำอะไร, กับอะไร, เหตุผล, IP, ผล
-- เก็บอย่างน้อย 1 ปี
+- Table `audit_log` is **append-only** (DB rights: INSERT only for the app user) + a hash chain (`prev_hash`) to detect tampering
+- A copy is streamed to the organisation's syslog / SIEM in real time
+- Records: who (user / local:user / system / rollout), what, on what, why, IP, result
+- Kept for at least 1 year
 
 ## 7. Hardening
 
-| ที่ | มาตรการ |
+| Where | Measures |
 |---|---|
-| Server host | SSH key only + MFA (หรือ bastion), UFW เปิดแค่ 443 (+ SSH จาก admin subnet), unattended-upgrades, ปิด service ที่ไม่ใช้ |
-| Guacamole | เข้าผ่าน auth ของ backend เท่านั้น, ไม่เปิดพอร์ต VNC ออกนอก host, บันทึก session |
-| nginx | TLS 1.2+ เท่านั้น, HSTS, rate limit ที่ `/v1/agent/enroll`, ขนาด request จำกัด |
-| Agent | ไม่มีพอร์ตเปิดรับ, named pipe ACL Admins+SYSTEM, ไฟล์ใน Program Files/ProgramData ACL จำกัด |
-| WinPE | ไม่มี shell เปิดให้ผู้ใช้ (startnet รัน swim-pe แล้วรีบูต/แสดงหน้าจอ error เท่านั้น), ปิด Shift+F10 ไม่ได้ใน PE แต่ PE ไม่มีความลับถาวร |
-| CI | branch protection, signed commits สำหรับ tag release, `govulncheck`, SBOM ต่อ release |
+| Server host | SSH keys only + MFA (or a bastion), UFW open for 443 only (+ SSH from the admin subnet), unattended-upgrades, unused services off |
+| Guacamole | reachable through the backend's auth only, no VNC port outside the host, sessions recorded |
+| nginx | TLS 1.2+ only, HSTS, rate limit on `/v1/agent/enroll`, request size limits |
+| Agent | no listening port, named pipe ACL Admins + SYSTEM, restricted ACLs in Program Files / ProgramData |
+| WinPE | no shell for the user (startnet runs swim-pe, then reboots or shows an error screen); Shift+F10 cannot be disabled in PE, but PE holds no lasting secrets |
+| CI | branch protection, signed commits for release tags, `govulncheck`, SBOM per release |
 
-## 8. ทดสอบความปลอดภัย
+## 8. Security testing
 
-- ก่อนขึ้น production (จบ Phase 3): pentest ภายในของ API + agent (enroll abuse, manifest tamper, replay go-token, privilege escalation ผ่าน named pipe)
-- ทุก release: test อัตโนมัติ "manifest ที่ถูกแก้ 1 byte ต้องถูกปฏิเสธ", "keyset ที่ไม่ได้เซ็นต้องถูกปฏิเสธ", "downgrade โดยไม่มี directive ต้องถูกปฏิเสธ"
+- Before production (end of Phase 3): an internal penetration test of the API and the agent (enrollment abuse, manifest tampering, go-token replay, privilege escalation through the named pipe)
+- Every release: automated tests that "a manifest altered by 1 byte is rejected", "an unsigned keyset is rejected", "a downgrade without a directive is rejected"

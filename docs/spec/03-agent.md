@@ -1,203 +1,204 @@
 # 03 · SWIM Agent (Windows)
 
-## 1. โครงสร้างภายใน
+**English** · [ไทย](03-agent.th.md)
+
+## 1. Internal structure
 
 ```
-swim-svc.exe  (Windows Service "SWIMSupervisor", LocalSystem, เล็กมาก เปลี่ยนน้อย)
-  └── สตาร์ตและเฝ้า swim-agent.exe (เวอร์ชันตาม registry "ActiveVersion"), ทำ self-update (04-agent-updates)
+swim-svc.exe  (Windows service "SWIMSupervisor", LocalSystem, very small, rarely changes)
+  └── starts and watches swim-agent.exe (version from the registry value "ActiveVersion"), performs self-update (04-agent-updates)
 
-swim-agent.exe (process ลูก, LocalSystem)
-├── control    heartbeat 30s + long-poll คำสั่ง (timeout 55s)       ← ไม่มีวันถูกงานยาวบล็อก
-├── worker     งานยาว (staging, download, shrink) ทีละ 1 job      ← เขียน event ลง outbox
-├── outbox     SQLite (C:\ProgramData\SWIM\outbox.db) มี seq      ← ส่งขึ้น server แบบ at-least-once
-├── watchdog   timeout ต่อขั้น = max(expected × 3, ขั้นต่ำ)       ← ค้าง = cancel + รายงาน
-├── netcond    ตรวจ metered / VPN / เครือข่ายองค์กร / site       ← กำหนดว่าโหลดได้ไหม
-├── telemetry  inventory (SMBIOS, disk, BitLocker, battery, license)
-├── localipc   named pipe \\.\pipe\swim (ACL: Administrators + SYSTEM เท่านั้น)
-└── notifier   แจ้งผู้ใช้ที่ล็อกอิน (ผ่าน swim-notify.exe ใน session ผู้ใช้)
+swim-agent.exe (child process, LocalSystem)
+├── control    30 s heartbeat + command long-poll (55 s timeout)     ← never blocked by long work
+├── worker     long work (staging, download, shrink), one job at a time ← writes events to the outbox
+├── outbox     SQLite (C:\ProgramData\SWIM\outbox.db) with a sequence  ← delivered to the server at-least-once
+├── watchdog   per-step timeout = max(expected × 3, a floor)          ← stuck = cancel + report
+├── netcond    detects metered / VPN / corporate network / site       ← decides whether downloads are allowed
+├── telemetry  inventory (SMBIOS, disk, BitLocker, battery, licence)
+├── localipc   named pipe \\.\pipe\swim (ACL: Administrators + SYSTEM only)
+└── notifier   notifies the signed-in user (through swim-notify.exe in the user's session)
 ```
 
-- ทุก HTTP call: timeout ชัดเจน + retry exponential backoff (1s → 5 นาที) + jitter ±20%
-- ระหว่างขั้นสำคัญเรียก `SetThreadExecutionState(ES_CONTINUOUS|ES_SYSTEM_REQUIRED)` กันเครื่อง sleep
-- ไฟล์และโฟลเดอร์: `C:\Program Files\SWIM\versions\<ver>\` · ข้อมูล `C:\ProgramData\SWIM\` (ACL SYSTEM+Admins)
+- Every HTTP call has an explicit timeout + exponential backoff retry (1 s → 5 min) + ±20% jitter
+- During critical steps it calls `SetThreadExecutionState(ES_CONTINUOUS|ES_SYSTEM_REQUIRED)` so the machine does not sleep
+- Files and folders: `C:\Program Files\SWIM\versions\<ver>\` · data in `C:\ProgramData\SWIM\` (ACL SYSTEM + Admins)
 
-## 2. การติดตั้งครั้งแรกบนเครื่องที่มีอยู่ (Bootstrap)
+## 2. First installation on an existing machine (bootstrap)
 
-| ช่องทาง | วิธี | หมายเหตุ |
+| Channel | How | Notes |
 |---|---|---|
-| **หน้า "เพิ่มเครื่อง" → .msi** (หลัก, v0.2) | Admin เลือก site/อายุ/จำนวน → ได้ไฟล์ `swim-agent-<ver>-<site>.msi` ที่ฝัง server + pin + token → ดับเบิลคลิก → UAC → เสร็จ | server สร้าง MSI ด้วย `wixl` ทุกครั้ง (~1 วินาที), ProductCode คงที่ต่อเวอร์ชัน |
-| หน้า "เพิ่มเครื่อง" → คำสั่ง PowerShell (สำรอง) | วางคำสั่งใน Terminal (Admin) | คำสั่งมี server URL + enrollment token + **pin SHA-256 ของใบรับรอง server** |
-| **GPO** (แนะนำสำหรับ AD) | Startup Script รันคำสั่งเดียวกัน (หรือ `swim-agent.msi` เมื่อมี) | token แบบไม่จำกัดจำนวน อายุสั้น แล้วยกเลิกเมื่อเสร็จ |
+| **"Add machine" page → .msi** (primary, v0.2) | The admin picks site / lifetime / uses → gets `swim-agent-<ver>-<site>.msi` with server + pin + token embedded → double-click → UAC → done | The server builds the MSI with `wixl` every time (~1 second); the ProductCode is fixed per version |
+| "Add machine" page → PowerShell command (fallback) | Paste the command into an elevated terminal | The command carries the server URL + enrollment token + **SHA-256 pin of the server certificate** |
+| **GPO** (recommended with AD) | A startup script runs the same command (or `swim-agent.msi` when available) | An unlimited-use, short-lived token, revoked when done |
 | Intune / SCCM | PowerShell script (SYSTEM) / Win32 app | |
-| Unattend (เครื่องใหม่) | `FirstLogonCommands` รันคำสั่งเดียวกัน | ทดสอบแล้วด้วย `scripts/create-test-client.sh` |
+| Unattend (new machines) | `FirstLogonCommands` runs the same command | Tested with `scripts/create-test-client.sh` |
 
-Flow ของคำสั่งติดตั้ง (`agent/install/install.ps1`, เสิร์ฟที่ `/dl/agent/install.ps1`):
-1. PowerShell ตั้ง `ServerCertificateValidationCallback` ให้ยอมเฉพาะใบรับรองที่ SHA-256 ตรง pin → ดึง `install.ps1`
-2. อ่าน `/dl/agent/latest.json` → ดาวน์โหลด exe → ตรวจ SHA-256 → `C:\Program Files\SWIM\swim-agent.exe`
-3. ตั้ง ACL `C:\ProgramData\SWIM` ให้เฉพาะ SYSTEM + Administrators
-4. `swim-agent enroll` (agent pin ใบรับรองเองอีกชั้น) → host token เก็บแบบ DPAPI (machine scope)
-5. `swim-agent install` → Windows Service `SWIMAgent` (Automatic, restart เมื่อ crash) → heartbeat ทุก 60 วินาที (lab)
+Flow of the install command (`agent/install/install.ps1`, served at `/dl/agent/install.ps1`):
+1. PowerShell sets `ServerCertificateValidationCallback` to accept only the certificate whose SHA-256 matches the pin → fetches `install.ps1`
+2. Reads `/dl/agent/latest.json` → downloads the exe → verifies SHA-256 → `C:\Program Files\SWIM\swim-agent.exe`
+3. Sets the ACL of `C:\ProgramData\SWIM` to SYSTEM + Administrators only
+4. `swim-agent enroll` (the agent pins the certificate itself as a second layer) → the host token is stored with DPAPI (machine scope)
+5. `swim-agent install` → Windows service `SWIMAgent` (Automatic, restarts on crash) → heartbeat every 60 seconds (lab)
 
-- ไฟล์ใน `/dl/agent/` เป็น public ได้เพราะไม่มีความลับ — ความลับอยู่ใน token ที่ admin ออกเท่านั้น
-- **ก่อน production:** exe/MSI ต้อง **Authenticode-signed** (กัน SmartScreen/Defender) และ `latest.json` ต้องเซ็นด้วย release key (Ed25519, [04](04-agent-updates.md)) แทนการพึ่ง TLS pin อย่างเดียว
-- Enrollment token: ผูก **site** + มีวันหมดอายุ + จำกัดจำนวนครั้ง, สร้างจาก Admin UI (RBAC: `admin`)
+- The files in `/dl/agent/` can be public because they contain no secrets — the only secret is the token an admin issues
+- **Before production:** the exe/MSI must be **Authenticode-signed** (SmartScreen / Defender) and `latest.json` must be signed with the release key (Ed25519, [04](04-agent-updates.md)) instead of relying on the TLS pin alone
+- Enrollment tokens are bound to a **site**, expire and have a use limit; they are created from the admin UI (RBAC: `admin`)
 
-### 2.1 Agent ต้องอยู่ต่อเนื่องเสมอ (ไม่มีรอยต่อหลังล้างเครื่อง)
+### 2.1 The agent must always persist (no gap after a reimage)
 
-| เหตุการณ์ | Agent กลับมาอย่างไร | host_id |
+| Event | How the agent comes back | host_id |
 |---|---|---|
-| ติดตั้งครั้งแรก | MSI (ดับเบิลคลิก/GPO/Intune) → เขียน `HKLM\SOFTWARE\SWIM\Bootstrap` (Server, Pin, Token) → service enroll เอง → ลบ Token | ใหม่ |
-| **SWIM ล้างเครื่อง** | swim-pe ใส่ exe + service + `bootstrap.json` (reimage ticket) ลง Windows ใหม่ ([05 §4.3](05-deployment-flow.md)) | **เดิม** |
-| ช่างลง USB เอง | ติดตั้ง MSI → enroll ด้วย token → server จับคู่ smbios_uuid + serial | **เดิม** (ป้าย `manual_install`) |
-| ติดตั้งตอนไม่มีเน็ต | service รอและ enroll เองเมื่อเน็ตกลับมา (ก่อน token หมดอายุ) | — |
+| First installation | MSI (double-click / GPO / Intune) → writes `HKLM\SOFTWARE\SWIM\Bootstrap` (Server, Pin, Token) → the service enrolls by itself → deletes the token | new |
+| **Reimaged by SWIM** | swim-pe places the exe + service + `bootstrap.json` (reimage ticket) into the new Windows ([05 §4.3](05-deployment-flow.md)) | **same** |
+| Technician installs from USB | Install the MSI → enroll with a token → the server matches smbios_uuid + serial | **same** (labelled `manual_install`) |
+| Installed without network | The service waits and enrolls when the network returns (before the token expires) | — |
 
-**ข้อห้าม — ไม่ส่งต่อ "ตัวตน" ของ agent ข้ามการติดตั้ง Windows:** ถ้าคัด state ไปด้วย (หรือ agent ที่ enroll แล้วติดไปกับ Golden Master)
-ทุกเครื่องที่ได้ image จะเป็น host เดียวกัน ระบบจึงมี 3 ชั้นกัน:
-1. Capture ตัด `\ProgramData\SWIM` ออกจาก WIM เสมอ (builder exclusion list)
-2. Clone guard: state ผูก SMBIOS UUID — UUID ไม่ตรง หรือ DPAPI เปิด token ไม่ได้ → ย้าย state ทิ้ง (`state.json.discarded-*`) แล้ว enroll ใหม่
-3. Reimage ticket ใช้ได้ครั้งเดียว ผูก host และ SMBIOS UUID, อายุ ≤ 72 ชม.
+**Hard rule — the agent's identity never travels across a Windows installation.** If state were copied (or an enrolled agent stayed in the Golden Master), every machine receiving the image would be the same host. Three layers prevent that:
+1. Capture always excludes `\ProgramData\SWIM` from the WIM (builder exclusion list)
+2. Clone guard: the state is bound to the SMBIOS UUID — a different UUID, or DPAPI failing to open the token → the state is moved aside (`state.json.discarded-*`) and the agent enrolls again
+3. A reimage ticket is single-use, bound to the host and its SMBIOS UUID, valid ≤ 72 hours
 
-## 3. ตัวตนของเครื่อง (Identity)
+## 3. Machine identity
 
-### การลงทะเบียน (Enroll)
+### Enrollment
 
 ```
-1. agent สร้าง keypair:
-     - ECDSA P-256 ใน TPM ผ่าน "Microsoft Platform Crypto Provider" (ถ้ามี TPM)
-     - fallback: software key เก็บด้วย DPAPI (machine scope)
-   + X25519 keypair สำหรับ "เปิดซอง" ข้อมูลลับใน manifest (DPAPI)
+1. the agent creates a key pair:
+     - ECDSA P-256 in the TPM through the "Microsoft Platform Crypto Provider" (when a TPM exists)
+     - fallback: a software key protected with DPAPI (machine scope)
+   + an X25519 key pair to "open the envelope" of secrets in a manifest (DPAPI)
 2. POST /v1/agent/enroll { token, csr, x25519_pub, smbios_uuid, serial, vendor, model, ... }
-3. server จับคู่ host:
-     - มี host เดิมที่ smbios_uuid + serial ตรง → ใช้ host_id เดิม (re-enroll)
-     - ไม่มี → สร้าง host ใหม่
-4. server ออก client cert (mTLS) อายุ 90 วัน → agent ต่ออายุเองเมื่อเหลือ 1/3
+3. the server matches the host:
+     - an existing host with the same smbios_uuid + serial → same host_id (re-enroll)
+     - none → a new host is created
+4. the server issues a client certificate (mTLS) valid for 90 days → the agent renews it at one third remaining
 ```
 
-- `smbios_uuid` ที่เป็นค่าขยะ (`FFFFFFFF-…`, `00000000-…`, `03000200-0400-0500-0006-000700080009`) → ใช้ `serial + vendor + model` แทน และติดธง `weak_identity`
+- A junk `smbios_uuid` (`FFFFFFFF-…`, `00000000-…`, `03000200-0400-0500-0006-000700080009`) → `serial + vendor + model` is used instead and the host is flagged `weak_identity`
 
-### หลัง Reimage
+### After a reimage
 
-- WinPE เขียน **reimage ticket** (ใช้ครั้งเดียว, อายุ 24 ชม., ผูก job_id + host_id) ลง `C:\ProgramData\SWIM\reimage.ticket` ของ Windows ใหม่
-- agent ใหม่ enroll ด้วย ticket → ได้ host_id เดิมโดยไม่ต้องมี enroll token
+- WinPE writes a **reimage ticket** (single-use, valid 24 hours, bound to job_id + host_id) to `C:\ProgramData\SWIM\reimage.ticket` of the new Windows
+- The new agent enrolls with the ticket → it gets the same host_id without an enrollment token
 
-## 4. คำสั่งจาก server (Allowlist — D-14, D-20)
+## 4. Server commands (allowlist — D-14, D-20)
 
-### 4.1 ที่ใช้งานได้แล้ว (agent 0.3)
+### 4.1 Available today (agent 0.3)
 
-| คำสั่ง | ระดับ | ผล | เงื่อนไข |
+| Command | Level | Effect | Condition |
 |---|---|---|---|
-| `ping` | safe | ตอบเวอร์ชัน + clock skew | — |
-| `collect_logs` | safe | ข้อมูลระบบ + error ใน System log 24 ชม. + agent.log 64 KB | — |
-| `refresh_inventory` | safe | ส่ง inventory ใหม่ → server อัปเดต host | — |
-| `restart_agent` | change | agent ออกแล้ว SCM recovery สตาร์ตใหม่ (~10 วินาที) | ถูกบล็อกเมื่อ kill switch ทำงาน |
-| `reboot` | change | `shutdown /r /t N /c <ข้อความ>` (N = 60 วินาที–24 ชม.) | ถูกบล็อกเมื่อ kill switch ทำงาน |
-| `run_script` | change | รัน PowerShell จาก **คลังสคริปต์ที่อนุมัติแล้ว** เป็น SYSTEM, timeout ≤ 1 ชม., ส่ง output + exit code กลับ | สคริปต์ต้องอนุมัติ 2 คน, ถูกบล็อกเมื่อ kill switch ทำงาน |
-| `uninstall_agent` | destructive | `msiexec /x` (ถ้ามาจาก MSI) + ลบ service, ไฟล์, ข้อมูล, registry → server ยกเลิก token ทันที | ต้องระบุเหตุผล + พิมพ์ชื่อเครื่องยืนยันบนเว็บ |
+| `ping` | safe | returns version + clock skew | — |
+| `collect_logs` | safe | system information + System log errors of the last 24 h + 64 KB of agent.log | — |
+| `refresh_inventory` | safe | sends a fresh inventory → the server updates the host | — |
+| `restart_agent` | change | the agent exits and SCM recovery restarts it (~10 seconds) | blocked while a kill switch is active |
+| `reboot` | change | `shutdown /r /t N /c <message>` (N = 60 seconds – 24 hours) | blocked while a kill switch is active |
+| `run_script` | change | runs PowerShell from the **approved script library** as SYSTEM, timeout ≤ 1 hour, returns output + exit code | two-person approval of the script, blocked while a kill switch is active |
+| `uninstall_agent` | destructive | `msiexec /x` (when installed by MSI) + removes the service, files, data and registry → the server revokes the token at once | a reason + typing the machine name to confirm in the console |
 
-นอกจากนี้ admin "ลบออกจากระบบ" (retire) ได้โดยไม่ผ่าน agent — ใช้กับเครื่องเสีย/หาย: ยกเลิก token และคำสั่งที่ค้าง
+An admin can also "remove from the system" (retire) without the agent — for broken or lost machines: it revokes the token and pending commands.
 
-### 4.2 ชั้นความปลอดภัยของช่องทางคำสั่ง
+### 4.2 Safety layers of the command channel
 
-1. **Allowlist ทั้งสองฝั่ง** (`pkg/manifest.CommandTypes`) — server ไม่สร้าง และ agent ไม่รับ type อื่น; **ไม่มี `run_command` / shell อิสระ**
-2. **ลายเซ็น Ed25519** ทุกคำสั่ง (envelope เดียวกับ manifest, [06](06-manifest.md)) ผูก `command_id` + `host_id` + **SMBIOS UUID** + `not_before/not_after` (1 ชม.)
-3. Agent ตรวจเวลาเทียบ **นาฬิกาของ server** (จาก header `Date`) — เครื่องที่นาฬิกาเพี้ยนยังใช้ได้ แต่คำสั่งเก่าใช้ไม่ได้
-4. **At-most-once** — agent บันทึก id ก่อนรัน (`commands-seen.json`), ส่งซ้ำไม่ทำซ้ำ
-5. **สคริปต์ 2 คน** — เนื้อหาล็อกด้วย SHA-256 ตั้งแต่สร้าง (แก้ไม่ได้), ผู้เขียนอนุมัติเองไม่ได้ (DB CHECK), agent ตรวจ hash อีกรอบก่อนรัน
-6. **Kill switch** บล็อกคำสั่งระดับ change/destructive; safe ยังใช้ได้เพื่อสืบปัญหา
-7. **Audit** — การสั่ง, การยกเลิก, ผลลัพธ์ (actor `host:<id>`) ลง audit log แบบ hash chain; agent log ทุกคำสั่งในเครื่องด้วย
-8. ช่องทางเป็น **agent ดึงเอง** (long-poll 25 วินาที) — เครื่องลูกไม่มีพอร์ตเปิด
+1. **Allowlist on both sides** (`pkg/manifest.CommandTypes`) — the server does not create and the agent does not accept any other type; **there is no `run_command` / free shell**
+2. **Ed25519 signature** on every command (same envelope as a manifest, [06](06-manifest.md)) binding `command_id` + `host_id` + **SMBIOS UUID** + `not_before/not_after` (1 hour)
+3. The agent checks time against the **server's clock** (from the `Date` header) — a machine with a wrong clock still works, but an old command does not
+4. **At-most-once** — the agent records the id before running (`commands-seen.json`); a resend is not executed again
+5. **Two-person scripts** — the content is locked by SHA-256 at creation (immutable), the author cannot approve their own script (DB CHECK), and the agent re-checks the hash before running
+6. The **kill switch** blocks change / destructive commands; safe ones still work for investigation
+7. **Audit** — issuing, cancelling and results (actor `host:<id>`) go to the hash-chained audit log; the agent also logs every command locally
+8. The channel is **agent pull** (25-second long-poll) — clients have no open port
 
-**ข้อจำกัดที่รู้อยู่:** กุญแจเซ็นคำสั่งอยู่บน server — ผู้ที่ยึด server ได้ทั้งเครื่องจะเซ็นคำสั่งได้ ระยะต่อไป: แยกการเซ็นสคริปต์ไปที่ผู้อนุมัติ (กุญแจของคน/HSM) เพื่อให้ server อย่างเดียวสั่งรันโค้ดไม่ได้
+**Known limitation:** the command-signing key lives on the server — whoever takes over the whole server can sign commands. Next step: move script signing to the approvers (personal keys / HSM) so the server alone cannot run code.
 
-### 4.3 ที่จะเพิ่มกับระบบ deploy (ยังไม่มี)
+### 4.3 To be added with the deployment system (not yet)
 
-| คำสั่ง | ผล |
+| Command | Effect |
 |---|---|
-| `stage` | โหลด image/winpe/drivers เก็บบน S: ล่วงหน้า |
-| `deploy` / `rollback` | ทำ job ตาม manifest (แจ้งผู้ใช้ + นับถอยหลัง) |
-| `cancel` | ยกเลิก job ที่ยังไม่ถึง PONR |
-| `resize_staging` | ปรับขนาด S: |
-| `update_agent` | อัปเดต agent ทันที (security fix) |
+| `stage` | download image / WinPE / drivers to S: ahead of time |
+| `deploy` / `rollback` | run a job from a manifest (notify the user + countdown) |
+| `cancel` | cancel a job that has not reached the PONR |
+| `resize_staging` | resize S: |
+| `update_agent` | update the agent immediately (security fix) |
 
-### คำสั่ง local (CLI `swim`)
+### Local commands (the `swim` CLI)
 
 ```
-swim status                      # สถานะ agent, job, S:, version
-swim stage                       # โหลด image ที่ published ล่วงหน้า
-swim deploy [--at 22:00]         # ใช้เฉพาะ manifest ที่ server เซ็นและยังไม่หมดอายุ
+swim status                      # agent, job, S:, version
+swim stage                       # pre-download the published image
+swim deploy [--at 22:00]         # only with a manifest the server signed and that has not expired
 swim rollback
 swim cancel
 swim logs --export D:\swim-logs.zip
 ```
 
-- ต้องเป็น **Local Administrator** (ตรวจที่ ACL ของ named pipe + ตรวจ token อีกชั้น)
-- deploy แบบ local ต้องมี **manifest ที่เซ็นแล้ว** ใน cache: agent ขอ "standing manifest" ของ channel ปัจจุบันล่วงหน้าไว้ (อายุ 7 วัน, ต่ออายุทุก heartbeat ชั่วโมงละครั้ง) → ช่างสั่งได้แม้ออฟไลน์ แต่ใช้ image อื่นนอกจากที่อนุมัติไม่ได้
-- ทุกคำสั่ง local บันทึก `actor = local:<DOMAIN\user>` ลง outbox → ขึ้น audit log ของ server
+- Requires a **local administrator** (checked by the named pipe ACL and again by the token)
+- A local deploy needs a **signed manifest** in the cache: the agent requests a "standing manifest" of its current channel in advance (valid 7 days, refreshed once an hour on heartbeat) → a technician can run it offline, but only with the approved image
+- Every local command records `actor = local:<DOMAIN\user>` in the outbox → it reaches the server's audit log
 
 ## 5. Preflight
 
-| ID | ตรวจ | ระดับ |
+| ID | Check | Level |
 |---|---|---|
-| P-01 | เสียบไฟ AC (ถ้ามีแบต) และแบต ≥ 30% | **BLOCK** |
+| P-01 | On AC power (when a battery exists) and battery ≥ 30% | **BLOCK** |
 | P-02 | UEFI + GPT | **BLOCK** |
-| P-03 | arch ตรง channel | **BLOCK** |
-| P-04 | ดิสก์ OS ≥ `min_disk_gb` | **BLOCK** |
-| P-05 | มี storage driver ของรุ่นนี้ใน `boot.wim` ที่ published (server ตอบจาก driver matrix) | **BLOCK** |
-| P-06 | S: มีอยู่และจุพอ หรือ shrink C: ได้ (`Get-PartitionSupportedSize`) | **BLOCK** |
-| P-07 | Secure Boot state + mitigation ตรงกับที่ WinPE รองรับ | **BLOCK** ถ้าไม่ตรง |
-| P-08 | Kill switch ปิดอยู่ + manifest ยังไม่หมดอายุ + ลายเซ็นถูก | **BLOCK** |
-| P-09 | BitLocker เปิด → จะ suspend ให้ | WARN |
-| P-10 | ไม่มี driver pack ที่ตรงรุ่นแบบเต็ม | WARN |
-| P-11 | edition ของ license (OEM) ไม่ตรง image | WARN |
-| P-12 | มีผู้ใช้ล็อกอิน | INFO → ใช้ flow แจ้งเตือน |
-| P-13 | มีดิสก์มากกว่า 1 ลูก / มี USB storage เสียบ | INFO (บันทึก GUID ดิสก์เป้าหมาย) |
+| P-03 | Architecture matches the channel | **BLOCK** |
+| P-04 | OS disk ≥ `min_disk_gb` | **BLOCK** |
+| P-05 | The published `boot.wim` has this model's storage driver (answered by the server from the driver matrix) | **BLOCK** |
+| P-06 | S: exists and is large enough, or C: can be shrunk (`Get-PartitionSupportedSize`) | **BLOCK** |
+| P-07 | Secure Boot state + mitigations match what WinPE supports | **BLOCK** on mismatch |
+| P-08 | Kill switch off + manifest not expired + signature valid | **BLOCK** |
+| P-09 | BitLocker is on → it will be suspended | WARN |
+| P-10 | No full driver pack for this model | WARN |
+| P-11 | Licence edition (OEM) does not match the image | WARN |
+| P-12 | A user is signed in | INFO → notification flow |
+| P-13 | More than one disk / USB storage attached | INFO (the target disk GUID is recorded) |
 
-ผล preflight ส่งขึ้น server เสมอ → ใช้คำนวณ risk/ETA ([05 §9](05-deployment-flow.md))
+Preflight results are always sent to the server → used for risk and ETA ([05 §9](05-deployment-flow.md)).
 
-## 6. Staging Partition (S:) — D-07
+## 6. Staging partition (S:) — D-07
 
-- **ถาวร**, label `SWIM-STAGE`, GPT type = Basic Data, attribute `GPT_ATTRIBUTE_NO_DRIVE_LETTER` + hidden (ไม่ให้ผู้ใช้เห็น) — agent mount ชั่วคราวเมื่อต้องใช้ (`mountvol`)
-- ขนาด: `max(24 GB, 2 × image_size + boot.wim + drivers + 2 GB)` ปัดขึ้นเป็น 4 GB
-- สร้างครั้งแรก: shrink C: แล้วสร้าง S: **ต่อท้าย C:** (ก่อน WinRE ถ้ามี)
-  - ถ้า shrink ไม่พอ: ปิด hibernation, ลบ VSS snapshot (`vssadmin delete shadows /for=C: /quiet`), ลอง `Get-PartitionSupportedSize` ใหม่
-- **BitLocker บน S:**: ต้องไม่ถูกเข้ารหัสอัตโนมัติ — agent ตรวจ `manage-bde -status` หลังสร้าง; ถ้ามี policy บังคับ fixed drive → รายงาน BLOCK พร้อมคำแนะนำให้ยกเว้น (label/GPO)
-- ข้อมูลใน S: **ไม่มีความลับ plain text** — ข้อมูลลับใน manifest ถูกเข้ารหัสด้วยกุญแจของเครื่อง (D-16)
+- **Permanent**, label `SWIM-STAGE`, GPT type Basic Data, attribute `GPT_ATTRIBUTE_NO_DRIVE_LETTER` + hidden (users do not see it) — the agent mounts it temporarily when needed (`mountvol`)
+- Size: `max(24 GB, 2 × image_size + boot.wim + drivers + 2 GB)` rounded up to 4 GB
+- First creation: shrink C: and create S: **right after C:** (before WinRE when present)
+  - If shrinking is not enough: turn off hibernation, delete VSS snapshots (`vssadmin delete shadows /for=C: /quiet`), try `Get-PartitionSupportedSize` again
+- **BitLocker on S:** must not be auto-encrypted — the agent checks `manage-bde -status` after creation; if policy forces fixed-drive encryption → it reports BLOCK with advice to exclude it (label / GPO)
+- S: holds **no plain-text secrets** — secrets in a manifest are encrypted to the machine's key (D-16)
 
 ```
 S:\swim\
 ├── images\<image_id>\{image.wim | chunks\, chunks.json, chunks.sig}
 ├── winpe\<pe_ver>\{boot.wim, boot.sdi}
 ├── drivers\<pack_id>\
-├── agent\<agent_ver>\swim-agent.msi          # ให้ WinPE ฉีด (D-18)
+├── agent\<agent_ver>\swim-agent.msi          # injected by WinPE (D-18)
 ├── jobs\<job_id>\{manifest.json, manifest.sig, state.json}
-└── logs\<job_id>\                            # เก็บ 5 job ล่าสุด
+└── logs\<job_id>\                            # last 5 jobs
 ```
 
-## 7. Download Engine
+## 7. Download engine
 
-- ไฟล์ใหญ่แบ่งเป็น **chunk 64 MiB** ตาม `chunks.json` (เซ็นแล้ว) → โหลด/verify/resume ทีละ chunk
-- ลำดับแหล่ง: **peer ใน subnet** (Phase 4) → **site cache** → **server**; chunk ที่ hash ไม่ตรง → ทิ้งและเปลี่ยนแหล่ง
-- จำกัดแบนด์วิดท์ด้วย token bucket: `max_download_mbps` จาก manifest; ลดลงอีก 50% เมื่อผู้ใช้กำลังใช้งาน (idle < 5 นาที)
-- จำนวน connection พร้อมกัน: 2 ต่อเครื่อง
-- Delta: ถ้า base อยู่บน S: แล้ว โหลดเฉพาะ delta
+- Large files are split into **64 MiB chunks** per the signed `chunks.json` → download / verify / resume per chunk
+- Source order: **peer in the subnet** (Phase 4) → **site cache** → **server**; a chunk with a wrong hash is dropped and the source is changed
+- Bandwidth is capped by a token bucket: `max_download_mbps` from the manifest; reduced by another 50% while the user is active (idle < 5 minutes)
+- Concurrent connections: 2 per machine
+- Delta: when the base is already on S:, only the delta is downloaded
 
-## 8. เงื่อนไขเครือข่าย (netcond)
+## 8. Network conditions (netcond)
 
-| สภาพ | ตรวจด้วย | โหลดได้ไหม |
+| Condition | Detected by | Download allowed? |
 |---|---|---|
-| Metered (hotspot, 4G/5G) | `INetworkCostManager` → `NLM_CONNECTION_COST_*` ≠ unrestricted | ❌ (ยกเว้น admin ตั้ง override) |
-| VPN | interface type / subnet ตาม config | ตามนโยบาย: ค่าเริ่มต้น **ไม่** โหลด image, อนุญาต heartbeat/agent update |
-| เครือข่ายองค์กร | ตรวจ DNS suffix + เข้าถึง `https://<server>/v1/ping` ได้ | ✅ |
-| Site | subnet → site mapping จาก server | เลือก site cache + นับ concurrency ต่อ site |
+| Metered (hotspot, 4G/5G) | `INetworkCostManager` → `NLM_CONNECTION_COST_*` ≠ unrestricted | ❌ (unless an admin sets an override) |
+| VPN | interface type / subnet from configuration | by policy: default **no** image download, heartbeat and agent updates allowed |
+| Corporate network | DNS suffix + `https://<server>/v1/ping` reachable | ✅ |
+| Site | subnet → site mapping from the server | selects the site cache + counts concurrency per site |
 
-## 9. การแจ้งผู้ใช้
+## 9. User notification
 
-- ก่อน deploy/rollback/reboot: แสดง toast + หน้าต่างนับถอยหลัง (ค่าเริ่มต้น 15 นาที) ข้อความ "ข้อมูลบนไดรฟ์ C: จะถูกลบทั้งหมด"
-- ผู้ใช้ **เลื่อนได้** ตาม `max_deferrals` (ค่าเริ่มต้น 2 ครั้ง ครั้งละ ≤ 4 ชม.) ถ้า job ไม่ใช่ `force`
-- บันทึกว่าแจ้งแล้ว/ผู้ใช้เลื่อนกี่ครั้ง ลง audit (D-05)
+- Before deploy / rollback / reboot: a toast + a countdown window (default 15 minutes) saying "All data on drive C: will be erased"
+- The user **may defer** up to `max_deferrals` (default 2 times, ≤ 4 hours each) unless the job is `force`
+- That the user was notified and how often they deferred is written to the audit log (D-05)
 
-## 10. Log ในเครื่อง
+## 10. Local logs
 
-- `C:\ProgramData\SWIM\logs\agent-YYYYMMDD.jsonl` หมุนทุกวัน เก็บ 14 วัน
-- log ของ job อยู่บน `S:\swim\logs\<job_id>\` เก็บ 5 job ล่าสุด
-- ระดับ severity และสิ่งที่ส่งขึ้น server ดู [09 §1](09-operations.md)
+- `C:\ProgramData\SWIM\logs\agent-YYYYMMDD.jsonl`, rotated daily, kept 14 days
+- Job logs are on `S:\swim\logs\<job_id>\`, last 5 jobs
+- Severity levels and what is sent to the server: see [09 §1](09-operations.md)

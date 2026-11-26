@@ -1,101 +1,103 @@
-# 07 · Fleet Safety — Wave, Concurrency, Kill Switch, Circuit Breaker, Fleet Rollback
+# 07 · Fleet Safety — Waves, Concurrency, Kill Switch, Circuit Breaker, Fleet Rollback
 
-## 1. Rollout ของ Image
+**English** · [ไทย](07-fleet-safety.th.md)
 
-การปล่อย image ให้หลายเครื่องทำผ่าน **Rollout** เสมอ (การสั่งรายเครื่องเป็น rollout ขนาด 1)
+## 1. Image rollouts
+
+Releasing an image to many machines always goes through a **rollout** (a single-machine order is a rollout of size 1).
 
 ```
-Rollout ro_77: win11-x64-stable v1.6 → เป้าหมาย: site BKK, OU Finance (412 เครื่อง)
- ├─ wave canary : 3 เครื่อง/รุ่น (ring=canary)      gate: 100% completed, soak 24 ชม.
- ├─ wave pilot  : 10%                                 gate: success ≥ 95%, soak 24 ชม.
- ├─ wave 50     : 50%                                 gate: success ≥ 97%
+Rollout ro_77: win11-x64-stable v1.6 → target: site BKK, OU Finance (412 machines)
+ ├─ wave canary : 3 machines per model (ring=canary)  gate: 100% completed, 24 h soak
+ ├─ wave pilot  : 10%                                  gate: success ≥ 95%, 24 h soak
+ ├─ wave 50     : 50%                                  gate: success ≥ 97%
  └─ wave 100    : 100%
 ```
 
-| กติกา | ค่าเริ่มต้น |
+| Rule | Default |
 |---|---|
-| รุ่นเครื่อง (`model`) ที่ยังไม่มีเครื่องผ่าน wave canary กับ image นี้ | **ไม่ถูกปล่อยใน wave ถัดไป** (ค้างเป็น `held: untested_model`) |
-| เลื่อน wave | อัตโนมัติเมื่อผ่าน gate (ตั้งเป็น manual ได้) |
-| image `pending` | ใช้ได้เฉพาะ wave canary; wave ถัดไปต้อง `published` |
+| A machine `model` with no machine that passed the canary wave on this image | **not released in the next wave** (stays `held: untested_model`) |
+| Advancing a wave | automatic once the gate passes (can be set to manual) |
+| A `pending` image | usable in the canary wave only; later waves need `published` |
 
-## 2. จำกัดการทำพร้อมกัน (Concurrency)
+## 2. Concurrency limits
 
-| ระดับ | ค่าเริ่มต้น | นับอะไร |
+| Level | Default | Counts |
 |---|---|---|
-| ทั้งระบบ | 50 | job ในสถานะ `handoff` → `health_check` |
-| ต่อ site | 10 | เหมือนกัน |
-| ต่อ site — download | 20 | job ใน `staging` ที่โหลดจาก server/WAN (ไม่นับ site cache/peer) |
-| ต่อ rollout | ตั้งได้ | |
+| System-wide | 50 | jobs in `handoff` → `health_check` |
+| Per site | 10 | the same |
+| Per site — download | 20 | jobs in `staging` downloading from the server / WAN (site cache and peers are not counted) |
+| Per rollout | configurable | |
 
-- agent ขอ slot ตอนออกจาก `waiting` (go-token §4) — ไม่ได้ slot = รอต่อ (backoff 5–15 นาที + jitter)
-- slot มี lease 2 ชม. ต่ออายุโดย heartbeat/event; เครื่องเงียบ → lease หมดเมื่อ `suspected_failure`
+- The agent requests a slot when leaving `waiting` (go-token, §4) — no slot = keep waiting (5–15 min backoff + jitter)
+- A slot has a 2-hour lease renewed by heartbeats and events; a silent machine loses its lease at `suspected_failure`
 
-## 3. Maintenance Window
+## 3. Maintenance windows
 
-- ตั้งต่อ site/OU: เช่น `จ–ศ 20:00–06:00, ส–อา ทั้งวัน`
-- deploy เริ่ม (handoff) ได้เฉพาะในหน้าต่าง; ถ้า ETA P90 เกินท้ายหน้าต่าง → รอหน้าต่างถัดไป
-- staging (download) ทำได้ตลอดตาม bandwidth policy
+- Configured per site / OU, e.g. `Mon–Fri 20:00–06:00, Sat–Sun all day`
+- A deploy may start (handoff) only inside the window; if ETA P90 runs past the end of the window → it waits for the next one
+- Staging (download) is always allowed, subject to the bandwidth policy
 
-## 4. Kill Switch
+## 4. Kill switch
 
-### ระดับ
+### Levels
 
-| ระดับ | ผล |
+| Level | Effect |
 |---|---|
-| **Global** | หยุดทุก rollout + ทุก job ที่ยังไม่ถึง PONR + หยุดแจก agent update |
-| Channel | หยุดเฉพาะ image ของ channel นั้น |
-| Site | หยุดเฉพาะเครื่องใน site |
-| Rollout | หยุด rollout เดียว (= pause) |
+| **Global** | stops every rollout + every job that has not reached the PONR + stops distributing agent updates |
+| Channel | stops only images of that channel |
+| Site | stops only machines in the site |
+| Rollout | stops one rollout (= pause) |
 
-### กลไก (ทำงานได้แม้เครื่องออฟไลน์บางส่วน)
+### Mechanisms (work even when some machines are offline)
 
-1. **Heartbeat** — ทุก heartbeat ตอบ `halt: {global, channels[], sites[]}` → agent ยกเลิก job ที่ยังไม่ถึง `handoff` ทันที (สถานะ `cancelled`)
-2. **Go-token** — ก่อน `handoff` agent ต้องขอ `POST /v1/agent/jobs/{id}/go` → server ตรวจ kill switch + slot + window → ออก token เซ็นแล้ว อายุ 15 นาที
-3. **WinPE check** — ใน `pe_verify` ถ้ามีเน็ต ถาม server อีกครั้ง; kill switch เปิด → `aborted`
-4. **Manifest หมดอายุ** — server หยุดออก/ต่ออายุ manifest ทันทีที่ kill switch เปิด → เครื่องที่ออฟไลน์และมี manifest อยู่จะทำต่อได้ไม่เกิน `not_after`
-5. job ที่ **ผ่าน PONR แล้ว** — หยุดไม่ได้ ทำต่อจนจบ (completed / rolled_back / failed) — Dashboard แสดงจำนวนนี้ชัดเจนตอนกด
+1. **Heartbeat** — every heartbeat answers `halt: {global, channels[], sites[]}` → the agent cancels jobs that have not reached `handoff` at once (state `cancelled`)
+2. **Go-token** — before `handoff` the agent must call `POST /v1/agent/jobs/{id}/go` → the server checks the kill switch + slot + window → issues a signed token valid 15 minutes
+3. **WinPE check** — in `pe_verify`, with network, the server is asked again; kill switch on → `aborted`
+4. **Manifest expiry** — the server stops issuing and renewing manifests the moment the kill switch is on → an offline machine holding a manifest can continue no later than `not_after`
+5. Jobs that are **past the PONR** cannot be stopped; they run to the end (completed / rolled_back / failed) — the dashboard shows this number clearly when the button is pressed
 
 ### UX
 
-- ปุ่มแดงบนทุกหน้า (RBAC: `release_manager`, `admin`) — ต้องพิมพ์เหตุผล; ปลดต้องใช้ 2 คน (คนกด + คนอนุมัติ) สำหรับ Global
-- หลังกด แสดง: "หยุดแล้ว N job · ผ่าน PONR แล้วกำลังทำต่อ M job · เครื่องออฟไลน์ที่มี manifest ค้าง K เครื่อง (หมดอายุภายใน X ชม.)"
+- A red button on every page (RBAC: `release_manager`, `admin`) — a reason must be typed; clearing a Global switch takes two people (one presses, one approves)
+- After pressing, the console shows: "Stopped N jobs · M jobs past the PONR are continuing · K offline machines hold a manifest (expires within X hours)"
 
-## 5. Circuit Breaker (หยุดเองอัตโนมัติ)
+## 5. Circuit breaker (automatic stop)
 
-ประเมินทุก 1 นาทีต่อ rollout และต่อ (rollout, model):
+Evaluated every minute per rollout and per (rollout, model):
 
-| เงื่อนไข | การกระทำ |
+| Condition | Action |
 |---|---|
-| wave canary มี `failed` หรือ `rolled_back` ≥ 1 | pause rollout |
-| wave อื่น: (`failed` + `rolled_back`) ≥ 2 ใน 10 job แรก หรือ > 5% (เมื่อ n ≥ 20) | pause rollout |
-| รุ่นใดรุ่นหนึ่ง: ล้ม ≥ 2 ครั้งติด | hold เฉพาะรุ่นนั้น (`held: model_breaker`) |
-| `suspected_failure` > 3% ของ job ที่กำลังทำ | pause rollout + แจ้งเตือน (อาจเป็นปัญหาเครือข่าย/server) |
-| ทั้งระบบ: ล้ม > 10 job ใน 30 นาที ข้ามหลาย rollout | **Global kill switch อัตโนมัติ** |
+| The canary wave has ≥ 1 `failed` or `rolled_back` | pause the rollout |
+| Other waves: (`failed` + `rolled_back`) ≥ 2 in the first 10 jobs, or > 5% (when n ≥ 20) | pause the rollout |
+| One model: ≥ 2 consecutive failures | hold only that model (`held: model_breaker`) |
+| `suspected_failure` > 3% of running jobs | pause the rollout + alert (may be a network or server problem) |
+| System-wide: > 10 failed jobs in 30 minutes across several rollouts | **automatic Global kill switch** |
 
-breaker ทำงาน → แจ้ง `release_manager` (อีเมล/Line/Teams webhook) + แนบสรุป error code ที่พบมากสุด + ลิงก์ log
+When the breaker trips → `release_manager` is notified (email / Line / Teams webhook) with a summary of the most frequent error codes and links to the logs.
 
-## 6. Fleet Rollback
+## 6. Fleet rollback
 
-สถานการณ์: image v1.6 ลงไปแล้ว 200 เครื่อง และพบปัญหาหลังใช้งาน
+Scenario: image v1.6 went out to 200 machines and a problem shows up in use.
 
 ```
-Release Manager → "Rollback v1.6 → v1.5" (ต้องระบุขอบเขต: ทั้งหมด / site / model / รายชื่อ)
-  → สร้าง Rollout ประเภท rollback (image = N-1, ข้าม wave canary ได้เพราะ v1.5 เคยผ่านแล้ว)
-  → ใช้ concurrency + maintenance window + การแจ้งผู้ใช้ ตามปกติ
-  → เครื่องที่มี v1.5 บน S: → ไม่ใช้เน็ต (~25 นาที/เครื่อง)
-  → เครื่องที่ไม่มี (S: เล็ก / ลบไปแล้ว) → โหลดจาก site cache/server
-  → channel: v1.5 กลับเป็น published, v1.6 = withdrawn (เก็บไฟล์ไว้วิเคราะห์ ห้าม deploy)
-  → N-1 ของ channel ใหม่ = รุ่นก่อน v1.5 (ถ้ายังมี) — แจ้งเตือนถ้าไม่มี
+Release manager → "Rollback v1.6 → v1.5" (a scope is required: all / site / model / list)
+  → creates a rollout of type rollback (image = N-1; the canary wave may be skipped because v1.5 already passed)
+  → normal concurrency + maintenance windows + user notification
+  → machines with v1.5 on S: → no network needed (~25 minutes per machine)
+  → machines without it (small S: / deleted) → download from the site cache / server
+  → channel: v1.5 becomes published again, v1.6 = withdrawn (files kept for analysis, deployment forbidden)
+  → the channel's new N-1 = the release before v1.5 (if still present) — warn if there is none
 ```
 
-- Dashboard ก่อนกด: "200 เครื่อง · 188 มี v1.5 บน S: · 12 ต้องโหลด (108 GB) · ETA ตาม window: 2 คืน"
-- ข้อมูลบน C: ของผู้ใช้หายอีกรอบ (D-05) — ข้อความแจ้งผู้ใช้ต้องบอกชัด
+- Dashboard before pressing: "200 machines · 188 have v1.5 on S: · 12 must download (108 GB) · ETA by window: 2 nights"
+- User data on C: is lost once more (D-05) — the user notice must say so clearly
 
-## 7. หน้าจอที่ต้องมี
+## 7. Required screens
 
-| หน้า | เนื้อหา |
+| Screen | Content |
 |---|---|
-| Rollout | wave, gate, สถานะต่อเครื่อง, breaker, ปุ่ม pause/resume/advance |
-| Fleet health | job ที่กำลังทำ แยกสถานะ, `suspected_failure`, slot ที่ใช้ต่อ site |
-| Kill switch | สถานะปัจจุบัน ทุกระดับ + ประวัติ (ใคร/เมื่อไหร่/เหตุผล) |
-| Model matrix | ตาราง model × image: ผ่าน/ล้ม/ยังไม่ทดสอบ |
+| Rollout | waves, gates, per-machine state, breaker, pause / resume / advance buttons |
+| Fleet health | running jobs by state, `suspected_failure`, slots in use per site |
+| Kill switch | current state at every level + history (who / when / why) |
+| Model matrix | model × image table: passed / failed / untested |

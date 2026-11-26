@@ -1,107 +1,109 @@
 # 01 · Architecture
 
-## 1. ภาพรวม
+**English** · [ไทย](01-architecture.th.md)
+
+## 1. Overview
 
 ```
                          ┌──────────────────────── SWIM Server (Ubuntu 24.04, bare metal) ────────────────────────┐
                          │                                                                                        │
- Admin (Browser) ──HTTPS─┼─► nginx ──► frontend (React)                                                           │
+ Admin (browser) ──HTTPS─┼─► nginx ──► frontend (React)                                                           │
                          │     │                                                                                  │
                          │     ├────► backend (Go) ──► PostgreSQL                                                 │
                          │     │        │   │                                                                     │
-                         │     │        │   └──► libvirt (KVM) ──┬─ VM: Golden Master (ต่อ channel)              │
-                         │     │        │                        ├─ VM: Image Test Runner (ทดสอบ deploy จริง)      │
-                         │     │        │                        └─ VM: Windows Utility (ADK/DISM/djoin, join AD) │
+                         │     │        │   └──► libvirt (KVM) ──┬─ VM: Golden Master (one per channel)          │
+                         │     │        │                        ├─ VM: Image Test Runner (real deploy tests)     │
+                         │     │        │                        └─ VM: Windows Utility (ADK/DISM/djoin, AD-joined)│
                          │     │        └──► job runner ── capture (wimlib/qemu-nbd) ── sign ── storage            │
-                         │     ├────► guacd ──VNC──► QEMU console ของ VM                                           │
+                         │     ├────► guacd ──VNC──► QEMU console of the VMs                                       │
                          │     └────► /storage (X-Accel-Redirect, HTTP Range)                                      │
                          └────────────────────────────────────────────────────────────────────────────────────────┘
-                                   ▲  HTTPS + mTLS (Agent ดึงเอง ไม่มีพอร์ตเปิดที่เครื่องลูก)
+                                   ▲  HTTPS + mTLS (the agent pulls; no port is open on the client)
              ┌─────────────────────┼───────────────────────────┐
-             │ (ทางเลือก) Site Cache │ nginx proxy_cache ต่อสาขา   │
+             │ (optional) Site Cache │ nginx proxy_cache per site │
              └─────────────────────┼───────────────────────────┘
                                    │
-   ┌───────────────────────────────┴───────────── เครื่องลูก (Windows 10/11) ─────────────────────────────┐
+   ┌───────────────────────────────┴───────────── Client (Windows 10/11) ───────────────────────────────┐
    │  swim-svc (supervisor/updater) ──► swim-agent (core)  ──► S:\swim\  (images, winpe, drivers, state) │
-   │                                                     └──► BCD ──► WinPE (swim-pe) ──► Windows ใหม่    │
+   │                                                     └──► BCD ──► WinPE (swim-pe) ──► new Windows    │
    └────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## 2. ส่วนประกอบ
+## 2. Components
 
-| ส่วน | ภาษา/เครื่องมือ | หน้าที่ |
+| Component | Language / tools | Role |
 |---|---|---|
-| `backend` | Go, PostgreSQL | API, คิวงาน (`FOR UPDATE SKIP LOCKED`), เซ็น manifest, rollout controller, circuit breaker |
-| `frontend` | React + TypeScript | Dashboard, Builder (ฝัง Guacamole), Release Manager, Host Inventory, Rollout |
-| `builder` | Go + shell | สั่ง libvirt, snapshot, capture ด้วย wimlib, ทดสอบ image, คำนวณ hash/chunk |
-| `utility-runner` | PowerShell บน Windows Utility VM | Build WinPE, DISM servicing, `djoin /provision /reuse` — รับงานจาก backend ผ่าน API ขาออก (pull) |
-| `swim-svc` | Go | Windows service ตัวเล็ก: เฝ้า/สตาร์ต `swim-agent`, ทำ self-update + auto-rollback (ดู [04](04-agent-updates.md)) |
-| `swim-agent` | Go | Telemetry, preflight, staging, BCD, รับคำสั่ง, รายงานผล, local CLI |
-| `swim-pe` | Go (ฝังใน `boot.wim`) | Worker ใน WinPE: verify → PONR → apply → drivers → ODJ → inject agent → bcdboot → boot supervisor |
-| `swim` (CLI) | Go | คำสั่งฝั่งเครื่อง (local) — คุยกับ agent ผ่าน named pipe ที่จำกัดสิทธิ์ Local Admin |
+| `backend` | Go, PostgreSQL | API, job queue (`FOR UPDATE SKIP LOCKED`), manifest signing, rollout controller, circuit breaker |
+| `frontend` | React + TypeScript | Dashboard, Builder (embedded Guacamole), Release Manager, Host Inventory, Rollout |
+| `builder` | Go + shell | Drives libvirt, snapshots, captures with wimlib, tests images, computes hashes and chunks |
+| `utility-runner` | PowerShell on the Windows Utility VM | Builds WinPE, DISM servicing, `djoin /provision /reuse` — pulls work from the backend over an outbound API |
+| `swim-svc` | Go | A small Windows service: watches and starts `swim-agent`, performs self-update and auto-rollback (see [04](04-agent-updates.md)) |
+| `swim-agent` | Go | Telemetry, preflight, staging, BCD, command handling, reporting, local CLI |
+| `swim-pe` | Go (embedded in `boot.wim`) | Worker inside WinPE: verify → PONR → apply → drivers → ODJ → inject agent → bcdboot → boot supervisor |
+| `swim` (CLI) | Go | Local commands on the machine — talks to the agent over a named pipe restricted to local administrators |
 
-> หมายเหตุ: Phase 1 ใช้ `worker.ps1` แทน `swim-pe` ได้ แต่ state machine ต้องตรงกับ [05](05-deployment-flow.md)
+> Note: Phase 1 may use `worker.ps1` instead of `swim-pe`, but the state machine must match [05](05-deployment-flow.md).
 
-## 3. Server — สเปกและการติดตั้ง
+## 3. Server — sizing and installation
 
-### ฮาร์ดแวร์ขั้นต่ำ
+### Minimum hardware
 
-| รายการ | ขั้นต่ำ | แนะนำ |
+| Item | Minimum | Recommended |
 |---|---|---|
 | CPU | 8 cores, VT-x/AMD-V | 16 cores |
 | RAM | 32 GB | 64 GB (Golden Master 8 GB + Test Runner 8 GB × 2 + Utility 4 GB + Docker) |
 | Storage (OS) | 256 GB SSD | |
-| Storage (data) | 1 TB SSD | 2 TB NVMe, ZFS หรือ LVM-thin สำหรับ snapshot |
-| NIC | 1 GbE | 10 GbE ถ้าเครื่องลูก > 500 |
+| Storage (data) | 1 TB SSD | 2 TB NVMe, ZFS or LVM-thin for snapshots |
+| NIC | 1 GbE | 10 GbE above 500 clients |
 
-### Software บน host
+### Host software
 
 - Ubuntu 24.04 LTS, `qemu-kvm`, `libvirt-daemon-system`, `ovmf` (Secure Boot vars), `swtpm`
 - `wimtools` (wimlib), `qemu-utils` (`qemu-nbd`), `ntfs-3g`
 - Docker Engine + Compose plugin
-- **ห้ามรัน Ubuntu เป็น VM ซ้อน** (nested virtualization) ใน production
+- **Do not run Ubuntu as a nested VM** in production
 
 ### Docker Compose services
 
 ```
 nginx      : 443 → frontend, /api → backend, /storage → X-Accel-Redirect, /guac → guacd
-backend    : Go API + job runner (privileged access to libvirt socket ผ่าน bind mount)
-frontend   : static build เสิร์ฟผ่าน nginx
-postgres   : 16.x, volume แยก, WAL archive (ดู 09-operations)
-guacamole  : guacamole/guacd + guacamole web (ใช้ auth ของ backend ผ่าน JSON auth extension)
+backend    : Go API + job runner (privileged access to the libvirt socket through a bind mount)
+frontend   : static build served by nginx
+postgres   : 16.x, separate volume, WAL archive (see 09-operations)
+guacamole  : guacamole/guacd + guacamole web (uses the backend's auth through the JSON auth extension)
 ```
 
-### VM บน Server
+### VMs on the server
 
-| VM | จำนวน | เฟิร์มแวร์ | ดิสก์ | หมายเหตุ |
+| VM | Count | Firmware | Disk | Notes |
 |---|---|---|---|---|
-| Golden Master | 1 ต่อ channel | OVMF + Secure Boot + swtpm | qcow2 80–100 GB | snapshot `clean-base`, `pre-sysprep-<ver>` |
-| Image Test Runner | 2 (ขนาดดิสก์ 128/512 GB) | OVMF + SB + swtpm | qcow2 | snapshot `old-windows+agent+bitlocker` |
-| Windows Utility | 1 | OVMF | 120 GB | join AD, มี ADK + WinPE add-on เวอร์ชันล่าสุด, ใช้ gMSA หรือบัญชีที่สิทธิ์จำกัดสำหรับ djoin |
+| Golden Master | 1 per channel | OVMF + Secure Boot + swtpm | qcow2 80–100 GB | snapshots `clean-base`, `pre-sysprep-<ver>` |
+| Image Test Runner | 2 (128 / 512 GB disks) | OVMF + SB + swtpm | qcow2 | snapshot `old-windows+agent+bitlocker` |
+| Windows Utility | 1 | OVMF | 120 GB | AD-joined, latest ADK + WinPE add-on, uses a gMSA or a limited account for djoin |
 
-## 4. การไหลของเครือข่าย
+## 4. Network flows
 
-| จาก → ถึง | โปรโตคอล | หมายเหตุ |
+| From → to | Protocol | Notes |
 |---|---|---|
-| Agent → Server | HTTPS 443 + mTLS | long-poll, heartbeat, event, download |
-| Agent → Site Cache | HTTPS 443 | ไฟล์เท่านั้น (ตรวจ chunk hash) |
-| Agent → Peer (ทางเลือก Phase 4) | HTTPS บน subnet เดียวกัน | เสิร์ฟ chunk ที่ตรวจแล้วเท่านั้น |
-| Utility VM → Server | HTTPS (pull งาน) | ไม่มีพอร์ตขาเข้า |
-| Utility VM → AD DC | LDAP/Kerberos | สำหรับ djoin |
-| Admin → Server | HTTPS + SSO (OIDC/LDAP) | |
-| WinPE → Server | HTTPS (best-effort) | ไม่บังคับ — WinPE ทำงานออฟไลน์ได้ |
+| Agent → Server | HTTPS 443 + mTLS | long-poll, heartbeat, events, downloads |
+| Agent → Site Cache | HTTPS 443 | files only (chunk hashes are verified) |
+| Agent → Peer (optional, Phase 4) | HTTPS within the same subnet | serves verified chunks only |
+| Utility VM → Server | HTTPS (pulls work) | no inbound port |
+| Utility VM → AD DC | LDAP / Kerberos | for djoin |
+| Admin → Server | HTTPS + SSO (OIDC / LDAP) | |
+| WinPE → Server | HTTPS (best effort) | optional — WinPE works offline |
 
-## 5. โครง Monorepo
+## 5. Monorepo layout
 
 ```text
 swim-platform/
-├── docs/spec/                 # เอกสารชุดนี้
-├── pkg/                       # Go shared (import ได้ทั้ง backend/agent/pe)
-│   ├── manifest/              # struct + validate + sign/verify (Ed25519) + seal/open (X25519)
-│   ├── state/                 # state.json ของเครื่อง + transitions (source of truth ของ state machine)
-│   ├── chunks/                # chunk manifest, hash, resume
-│   ├── proto/                 # API DTO + version negotiation
-│   └── logx/                  # structured log + severity
+├── docs/spec/                 # these documents
+├── pkg/                       # shared Go (imported by backend, agent and pe)
+│   ├── manifest/              # structs + validation + sign/verify (Ed25519) + seal/open (X25519)
+│   ├── state/                 # the machine's state.json + transitions (source of truth of the state machine)
+│   ├── chunks/                # chunk manifest, hashing, resume
+│   ├── proto/                 # API DTOs + version negotiation
+│   └── logx/                  # structured logging + severity
 ├── backend/
 │   ├── cmd/server/
 │   ├── internal/{api,db,rollout,breaker,builder,signing,storage,odj,auth,audit}/
@@ -112,18 +114,18 @@ swim-platform/
 │   └── internal/{control,worker,outbox,watchdog,preflight,staging,bootmgr,netcond,telemetry,update,localipc}/
 ├── pe/
 │   ├── cmd/swim-pe/
-│   ├── winpe/build-winpe.ps1  # รันบน Utility VM
+│   ├── winpe/build-winpe.ps1  # runs on the Utility VM
 │   └── winpe/startnet.cmd
 ├── builder-infra/
 │   ├── docker-compose.yml
 │   ├── nginx/
-│   ├── libvirt/               # XML ของ VM templates
+│   ├── libvirt/               # VM template XML
 │   └── scripts/{capture-wim.sh,test-image.sh}
-└── utility-runner/            # PowerShell agent บน Windows Utility VM
+└── utility-runner/            # PowerShell agent on the Windows Utility VM
 ```
 
-## 6. หลักการเวอร์ชัน
+## 6. Versioning
 
-- ทุกชิ้นใช้ SemVer: `agent 1.4.2`, `pe 1.4.0`, `manifest schema 1`, `api v1`
-- Server รองรับ Agent ย้อนหลัง **N-2 minor** (ดู [04](04-agent-updates.md))
-- `state.json` มี `schema_version` — `swim-pe` ต้องอ่าน schema ที่ agent เขียนได้ (compat matrix ใน [04 §8](04-agent-updates.md))
+- Everything uses SemVer: `agent 1.4.2`, `pe 1.4.0`, `manifest schema 1`, `api v1`
+- The server supports agents back to **N-2 minor** versions (see [04](04-agent-updates.md))
+- `state.json` carries a `schema_version` — `swim-pe` must read the schema the agent wrote (compatibility matrix in [04 §8](04-agent-updates.md))

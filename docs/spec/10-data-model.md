@@ -1,27 +1,29 @@
 # 10 · Data Model (PostgreSQL 16)
 
-> ID ใช้ ULID แบบมี prefix (`h_`, `img_`, `job_` …) เก็บเป็น `text`; เวลาเป็น `timestamptz` (UTC)
+**English** · [ไทย](10-data-model.th.md)
+
+> IDs are prefixed ULIDs (`h_`, `img_`, `job_` …) stored as `text`; times are `timestamptz` (UTC)
 
 ```sql
--- ───────── องค์กร / ผู้ใช้ ─────────
+-- ───────── organisation / users ─────────
 CREATE TABLE sites (
   id text PRIMARY KEY, name text NOT NULL UNIQUE,
   subnets cidr[] NOT NULL DEFAULT '{}',
-  cache_url text,                                   -- site cache (ถ้ามี)
+  cache_url text,                                   -- site cache (if any)
   max_concurrent_deploy int NOT NULL DEFAULT 10,
   max_concurrent_download int NOT NULL DEFAULT 20,
   maintenance_window jsonb                          -- {"tz":"Asia/Bangkok","rules":[...]}
 );
 
 CREATE TABLE users (
-  id text PRIMARY KEY, subject text NOT NULL UNIQUE, -- จาก SSO
+  id text PRIMARY KEY, subject text NOT NULL UNIQUE, -- from SSO
   display_name text, email text, disabled bool NOT NULL DEFAULT false
 );
 CREATE TABLE user_roles (
   user_id text NOT NULL REFERENCES users, role text NOT NULL,
-  site_id text REFERENCES sites                     -- null = ทุก site
+  site_id text REFERENCES sites                     -- null = every site
 );
--- PRIMARY KEY บังคับ NOT NULL จึงใช้ unique index แทน เพื่อให้ site_id = null (ทุก site) ได้
+-- PRIMARY KEY forces NOT NULL, so a unique index is used instead to allow site_id = null (every site)
 CREATE UNIQUE INDEX user_roles_uniq ON user_roles(user_id, role, COALESCE(site_id, '*'));
 
 -- ───────── Image ─────────
@@ -75,7 +77,7 @@ CREATE TABLE disk_profiles (
   rules jsonb NOT NULL, is_default bool NOT NULL DEFAULT false
 );
 
--- ───────── เครื่อง ─────────
+-- ───────── machines ─────────
 CREATE TABLE hosts (
   id text PRIMARY KEY,
   smbios_uuid uuid, serial text, vendor text, model text, match_key text, bios_version text,
@@ -123,7 +125,7 @@ CREATE TABLE deployment_jobs (
   winpe_id text REFERENCES winpe_releases, driver_pack_id text REFERENCES driver_packs,
   disk_profile_id text REFERENCES disk_profiles, disk_mode text NOT NULL DEFAULT 'refresh',
   target_hostname text, domain jsonb,
-  status text NOT NULL,                              -- ตาม 05 §1
+  status text NOT NULL,                              -- per 05 §1
   ponr_passed_at timestamptz, error_code text, severity text,
   eta_p50_s int, eta_p90_s int, risk text,
   actor text NOT NULL,                               -- user:… | rollout:… | local:…
@@ -133,7 +135,7 @@ CREATE TABLE deployment_jobs (
 CREATE INDEX jobs_active ON deployment_jobs(status) WHERE finished_at IS NULL;
 CREATE UNIQUE INDEX one_active_job_per_host ON deployment_jobs(host_id) WHERE finished_at IS NULL;
 
-CREATE TABLE job_events (                            -- append-only, idempotent ด้วย (job_id, seq)
+CREATE TABLE job_events (                            -- append-only, idempotent by (job_id, seq)
   job_id text REFERENCES deployment_jobs, seq int NOT NULL, source text NOT NULL, -- agent|pe|server
   status text, step text, severity text, data jsonb, at timestamptz NOT NULL,
   PRIMARY KEY (job_id, seq, source)
@@ -169,7 +171,7 @@ CREATE TABLE agent_releases (
 CREATE TABLE agent_update_events (id bigserial PRIMARY KEY, host_id text REFERENCES hosts,
   release_id text REFERENCES agent_releases, result text, detail jsonb, at timestamptz DEFAULT now());
 
--- ───────── งานฝั่ง Server (builder / utility VM) ─────────
+-- ───────── server-side tasks (builder / utility VM) ─────────
 CREATE TABLE server_tasks (
   id text PRIMARY KEY,
   kind text NOT NULL,          -- build_image | test_image | build_winpe | odj_provision | odj_reset | dism_service
@@ -185,12 +187,12 @@ CREATE TABLE audit_log (
   reason text, ip inet, result text, data jsonb,
   prev_hash bytea, hash bytea NOT NULL
 );
-REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM swim_app;   -- swim_app สร้างตอน initdb, ไม่เป็นเจ้าของตารางใด ๆ
+REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM swim_app;   -- swim_app is created at initdb and owns no table
 ```
 
-> ฉบับที่รันจริงอยู่ที่ `backend/migrations/0001_init.sql` (มี GRANT ให้ swim_app ครบ) — ทดสอบบน PostgreSQL 16 แล้ว
+> The version that actually runs is `backend/migrations/0001_init.sql` (with the full GRANTs for swim_app) — tested on PostgreSQL 16. Later migrations in the same folder extend it.
 
-## คิวงาน
+## Job queue
 
-- worker ของ backend ดึงงานด้วย `SELECT … FROM deployment_jobs WHERE … FOR UPDATE SKIP LOCKED`
-- งาน builder/utility ใช้ตาราง `server_tasks` แบบเดียวกัน (Utility VM ดึงผ่าน `/v1/utility/tasks`)
+- The backend worker takes jobs with `SELECT … FROM deployment_jobs WHERE … FOR UPDATE SKIP LOCKED`
+- Builder / utility tasks use the `server_tasks` table the same way (the Utility VM pulls through `/v1/utility/tasks`)

@@ -238,7 +238,7 @@ flowchart TB
 | ไฟล์ | image, WinPE และ agent ตรวจ SHA-256 ก่อนใช้ทุกครั้ง |
 | ประวัติ | แก้หรือลบตรง ๆ ไม่ได้ ตรวจความครบถ้วนของห่วงโซ่ได้จากหน้าเว็บ |
 
-รายละเอียดเพิ่มเติมอยู่ใน [docs/spec/08-security.md](docs/spec/08-security.md) และ [docs/OPERATIONS.th.md](docs/OPERATIONS.th.md)
+รายละเอียดเพิ่มเติมอยู่ใน [docs/spec/08-security.th.md](docs/spec/08-security.th.md) และ [docs/OPERATIONS.th.md](docs/OPERATIONS.th.md)
 
 ## ติดตั้ง
 
@@ -284,7 +284,7 @@ ISO ของ Windows ต้องจัดหาเองตามสิทธ�
 
 - [docs/INSTALL.th.md](docs/INSTALL.th.md) ติดตั้งตั้งแต่ server เปล่าจนสั่งติดตั้ง Windows เครื่องแรก
 - [docs/OPERATIONS.th.md](docs/OPERATIONS.th.md) อัปเดตระบบ, ออก agent รุ่นใหม่, สำรองข้อมูล, ความปลอดภัย, ปัญหาที่รู้อยู่
-- [docs/spec/](docs/spec/README.md) สเปคของระบบ 12 บท
+- [docs/spec/](docs/spec/README.th.md) สเปคของระบบ 12 บท
 - [docs/deploy/windows-trust-policy.md](docs/deploy/windows-trust-policy.md) ตั้งค่า GPO ให้เครื่องลูกเชื่อถือ server
 - [builder-infra/README.md](builder-infra/README.md) รายละเอียดของ Builder และการ capture image
 

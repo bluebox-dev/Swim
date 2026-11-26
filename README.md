@@ -249,7 +249,7 @@ flowchart TB
 | Files | Images, WinPE and agent updates are verified by SHA-256 before use |
 | Audit | The log cannot be edited or deleted directly, and the console can verify the hash chain |
 
-More detail: [docs/spec/08-security.md](docs/spec/08-security.md) (Thai) and [docs/OPERATIONS.md](docs/OPERATIONS.md).
+More detail: [docs/spec/08-security.md](docs/spec/08-security.md) and [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Quick start
 
@@ -330,7 +330,7 @@ You must supply your own Windows ISO under your organisation's licence.
 |---|---|
 | [Installation guide](docs/INSTALL.md): from an empty server to the first Windows install | English · [ไทย](docs/INSTALL.th.md) |
 | [Operations guide](docs/OPERATIONS.md): updates, agent releases, backup, security, known issues | English · [ไทย](docs/OPERATIONS.th.md) |
-| [Specification](docs/spec/README.md): 12 chapters covering architecture, agent, manifest, security, data model and API | Thai |
+| [Specification](docs/spec/README.md): 12 chapters covering architecture, agent, manifest, security, data model and API (the target design) | English · [ไทย](docs/spec/README.th.md) |
 | [Windows trust policy](docs/deploy/windows-trust-policy.md): Group Policy settings so clients trust the server | Thai |
 | [Builder internals](builder-infra/README.md): golden master and image capture details | Thai |
 
