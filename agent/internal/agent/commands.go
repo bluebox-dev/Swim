@@ -363,6 +363,11 @@ func execute(ctx context.Context, ec *execCtx, cmd manifest.Command) (string, an
 			return "", nil, nil, errors.New("invalid arguments")
 		}
 		out, data, err := remoteSession(ctx, ec.st, a, ec.lg)
+		if err == nil && a.Tunnel != "" {
+			ttl := time.Duration(min(max(a.TTLS, 120), 3600)) * time.Second
+			runTunnel(ec.c, ec.tok, a.Tunnel, "127.0.0.1:3389", time.Now().Add(ttl), ec.lg)
+			out += "; reachable through the agent's tunnel (the machine is behind a router)"
+		}
 		return out, data, nil, err
 	case "wake":
 		var a manifest.WakeArgs

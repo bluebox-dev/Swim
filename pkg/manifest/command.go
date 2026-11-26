@@ -59,6 +59,9 @@ type RemoteSessionArgs struct {
 	Sealed    string `json:"sealed"`     // base64(box.SealAnonymous(JSON(RemoteSecrets)))
 	AllowFrom string `json:"allow_from"` // IP allowed to reach RDP, or "LocalSubnet"
 	TTLS      int    `json:"ttl_s"`      // the account is disabled again after this long
+	// Tunnel: when set, the agent opens outbound connections to /v1/agent/tunnel/{id} and
+	// relays them to its own Remote Desktop, so the server needs no route to the machine.
+	Tunnel string `json:"tunnel,omitempty"`
 }
 
 // SetPolicyArgs is the "set_policy" command (desired machine policy).

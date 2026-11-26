@@ -185,7 +185,7 @@ func (s *Server) planCommand(ctx context.Context, hostID, typ string, rawArgs js
 		if versionLess(agentVer, minRemoteSessionAgent) {
 			return nil, &cmdErr{http.StatusConflict, "agent " + agentVer + " cannot open a remote session without a password — it updates itself to " + minRemoteSessionAgent + " shortly"}
 		}
-		args, auditArgs = a, map[string]any{"account": remoteAccount, "allow_from": a.AllowFrom, "ttl_s": a.TTLS}
+		args, auditArgs = a, map[string]any{"account": remoteAccount, "allow_from": a.AllowFrom, "ttl_s": a.TTLS, "tunnel": a.Tunnel != ""}
 	case "prestage_image":
 		var a manifest.PrestageArgs
 		if err := json.Unmarshal(rawArgs, &a); err != nil {

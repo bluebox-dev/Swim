@@ -39,6 +39,9 @@ services:
       SWIM_HEARTBEAT_S: "60"             # lab value; spec default is 300
     ports:
       - "127.0.0.1:8090:8080"          # only nginx (host network) talks to it
+      # remote tunnels: guacd (host network) reaches machines behind a router through these
+      # loopback-only ports; the agent supplies the other end over HTTPS (api/tunnel.go)
+      - "127.0.0.1:13390-13399:13390-13399"
     volumes:
       - ${SWIM_DATA:-/srv/swim}/storage:/storage
       - ${SWIM_DATA:-/srv/swim}/keys:/keys

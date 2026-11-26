@@ -1616,5 +1616,11 @@
 "สคริปต์ของทุกเครื่องมือเขียนและตรวจบน server แล้วเซ็นก่อนส่ง รันเป็น SYSTEM ถามยืนยันก่อนเสมอ และเก็บผลลัพธ์ไว้ในประวัติ": "Every tool's script is written and checked on the server, then signed before it is sent. Runs as SYSTEM, always asks for confirmation, and keeps the output in the history",
 "Script ของทุกเครื่องมือเขียนและตรวจบน server แล้วเซ็นก่อนส่ง รันเป็น SYSTEM ถามยืนยันก่อนเสมอ และเก็บผลลัพธ์ไว้ในประวัติ": "Every tool's script is written and checked on the server, then signed before it is sent. Runs as SYSTEM, always asks for confirmation, and keeps the output in the history",
 "เลือกจากสคริปต์ที่บันทึกไว้บน server": "Choose from the scripts saved on the server",
-"รหัสผ่านถูกส่งถึงเครื่องในคำสั่งที่เซ็นแล้ว และแสดงเป็น ******** ในประวัติการใช้งาน ใช้รหัสชั่วคราวเท่านั้น ผู้ใช้จะต้องเปลี่ยนตอนล็อกอินครั้งแรก": "The password travels to the machine inside the signed command and is shown as ******** in the activity log. Use a temporary password only; the user must change it at first sign-in"
+"รหัสผ่านถูกส่งถึงเครื่องในคำสั่งที่เซ็นแล้ว และแสดงเป็น ******** ในประวัติการใช้งาน ใช้รหัสชั่วคราวเท่านั้น ผู้ใช้จะต้องเปลี่ยนตอนล็อกอินครั้งแรก": "The password travels to the machine inside the signed command and is shown as ******** in the activity log. Use a temporary password only; the user must change it at first sign-in",
+"เครื่องนี้อยู่หลัง router (NAT)": "This machine is behind a router (NAT)",
+"เครื่องใช้ที่อยู่": "The machine uses the address",
+"แต่ server เห็นเป็น": "but the server sees it as",
+"server จึงเข้าหน้าจอเครื่องโดยตรงไม่ได้ Remote Desktop จะใช้ได้เมื่อย้ายเครื่องมาอยู่วงเดียวกับ server หรือตั้ง router ให้ส่งต่อพอร์ต 3389 มาที่เครื่องนี้ คำสั่งอื่น ๆ และการล้างเครื่องยังใช้ได้ตามปกติ": "so the server cannot reach its screen directly. Remote Desktop works once the machine is on the same network as the server, or the router forwards port 3389 to this machine. Other commands and reimaging work as usual",
+"Remote Desktop จะวิ่งผ่านอุโมงค์ที่ Agent เปิดออกมาหา server เอง จึงใช้ได้โดยไม่ต้องตั้งค่า router": "Remote Desktop runs through a tunnel the agent opens to the server itself, so it works without any router configuration",
+"Agent รุ่นนี้ยังเปิดอุโมงค์ Remote ไม่ได้ รอ Agent อัปเดตเป็น 0.5.24 ก่อน แล้ว Remote จะใช้ได้เอง": "This agent version cannot open a remote tunnel yet. Remote Desktop will work once the agent has updated itself to 0.5.24"
 }

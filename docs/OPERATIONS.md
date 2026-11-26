@@ -74,6 +74,10 @@ by the agents no longer matches and they must be reinstalled as well. Images in
   server `sudo docker exec swim-backend-1 swim-server user reset-2fa <username>` to get a new setup link.
 - **Commands to clients.** Every command is signed with Ed25519. The agent checks the signature,
   the validity window and replays.
+- **Remote Desktop.** The agent opens a reverse tunnel to the server (`backend/internal/api/tunnel.go`, agent 0.5.24
+  or newer), so it works for machines behind a router or firewall. The server side listens on loopback ports
+  13390-13399 only, for the 10 minutes a session may start. Guacamole's graphics pipeline (GFX) is turned off
+  because it left the desktop black on Windows 11.
 - **Tools on clients.** The script of every built-in tool is written and validated on the server
   (`backend/internal/api/tools.go`). The API accepts no script text from outside, and saving new
   scripts through the API is closed.

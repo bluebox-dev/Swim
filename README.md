@@ -49,6 +49,8 @@ walking to the machine.
   pre-stage images on clients ahead of time.
 - **Manage machines** with 26 built-in tools (power, local users, programs, services, Windows
   Update, network, disk), in-browser Remote Desktop, Wake-on-LAN and an install-lock policy.
+- **Works across networks.** The agent opens every connection itself, including a reverse tunnel for
+  Remote Desktop, so a machine only has to reach the server. No port forwarding, no VPN client.
 - **Audit everything.** Every action lands in a tamper-evident activity log, kept for 90 days.
 - **Secure by design.** Sign-in uses a password plus an authenticator app (TOTP), and every command
   sent to a client is signed with Ed25519.
@@ -80,7 +82,8 @@ Light theme:
 
 One server runs everything. The control plane lives in Docker Compose, and KVM/libvirt on the same
 host runs the golden master VM. Only port 443 is exposed to the network (port 80 redirects to it);
-internal services are not reachable from outside.
+internal services are not reachable from outside. Every connection between a client and the server is opened
+by the client's agent, so clients need no open port and can sit behind a router (NAT) or a firewall.
 
 ```mermaid
 flowchart LR
@@ -112,8 +115,8 @@ flowchart LR
     builder --> gm
     builder --> storage
     guac -- "VNC" --> gm
-    guac -- "RDP" --> agent
-    agent -- "HTTPS 443, long-poll<br/>pinned server certificate" --> nginx
+    guac -- "RDP to a loopback port<br/>(remote tunnel)" --> backend
+    agent -- "HTTPS 443, long-poll and remote tunnel<br/>pinned server certificate" --> nginx
     pe -- "HTTPS 443<br/>per-job token" --> nginx
     waker -. "magic packet" .-> agent
 ```
@@ -121,7 +124,7 @@ flowchart LR
 | Service | Role | Network |
 |---|---|---|
 | `nginx` | Single entry point. Serves the console, proxies the API and serves images the backend has authorised | 80, 443 |
-| `backend` | The whole API: signs commands, runs schedules, writes the activity log | `127.0.0.1:8090` |
+| `backend` | The whole API: signs commands, runs schedules, writes the activity log, terminates remote tunnels | `127.0.0.1:8090`, tunnels on `127.0.0.1:13390-13399` |
 | `postgres` | Database. The application role cannot alter or delete activity log rows | Docker internal network |
 | `builder` | Captures images and manages golden master snapshots | no ports |
 | `guacamole`, `guacd` | Golden master console (VNC) and client Remote Desktop in the browser | `:8080` (blocked by the firewall), `127.0.0.1:4822` |
@@ -246,6 +249,7 @@ flowchart TB
 | Console | Content-Security-Policy blocks injected scripts, HSTS, no framing by other sites |
 | Commands | Every command is signed, bound to one machine and expires. The agent never runs a command twice |
 | Secrets | The local admin password is sealed to the target machine. Scheduled jobs store it encrypted (AES-256-GCM) |
+| Remote Desktop | One-time password sealed to the machine, account enabled for 10 minutes, reached through a tunnel the agent opens; nothing listens on the client for the network |
 | Files | Images, WinPE and agent updates are verified by SHA-256 before use |
 | Audit | The log cannot be edited or deleted directly, and the console can verify the hash chain |
 
@@ -273,7 +277,7 @@ walkthrough, including building the first image, is in [docs/INSTALL.md](docs/IN
 .
 ├── backend/                  Control plane (Go)
 │   ├── cmd/server/           Entry point: API server, builder worker, waker, CLI
-│   ├── internal/api/         REST API: auth, hosts, commands, deploy, schedules, tools, audit
+│   ├── internal/api/         REST API: auth, hosts, commands, deploy, schedules, tools, remote tunnel, audit
 │   ├── internal/builder/     Image capture: reseal (sysprep), offline checks, ISO import
 │   ├── internal/audit/       Hash-chained activity log
 │   ├── internal/signing/     Ed25519 command-signing key
@@ -284,7 +288,7 @@ walkthrough, including building the first image, is in [docs/INSTALL.md](docs/IN
 │   └── tools/ntfs-unwof/     Helper that expands CompactOS (WOF) files before capture
 ├── agent/                    Windows agent (Go)
 │   ├── cmd/swim-agent/       Service entry point
-│   ├── internal/agent/       Enrollment, command loop, reimage, pre-staging, policy, remote session
+│   ├── internal/agent/       Enrollment, command loop, reimage, pre-staging, policy, remote session and tunnel
 │   └── install/              install.ps1 and Windows trust policy script
 ├── pe/cmd/swim-pe/           WinPE worker: partition, apply image, inject drivers and agent
 ├── pkg/

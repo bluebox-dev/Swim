@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -221,11 +222,23 @@ func (s *Server) deleteHost(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "deleted"})
 }
 
+// seenFrom is the address this machine's agent last connected from ("" if unknown or local).
+func (s *Server) seenFrom(hostID string) string {
+	v, _ := s.seenIP.Load(hostID)
+	ip, _ := v.(string)
+	if p := net.ParseIP(ip); p == nil || p.IsLoopback() {
+		return ""
+	}
+	return ip
+}
+
 func (s *Server) getHost(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var b []byte
 	err := s.pool.QueryRow(r.Context(), `SELECT to_jsonb(h) - 'dev_token_hash' - 'x25519_pub' - 'removed_token_hash'
 		|| jsonb_build_object('site_name', s.name, 'channel_name', c.name, 'online', $2::boolean,
+		   -- the address the agent connects from; when it is none of the machine's own, the machine is behind NAT
+		   'seen_ip', NULLIF($3::text, ''),
 		   -- accounts the install lock keeps as administrators (the agent also keeps RID 500 and groups)
 		   'policy_keep', jsonb_build_array('Administrator', 'swim-remote') || COALESCE((SELECT jsonb_build_array(ac.args->>'admin_user')
 		       FROM agent_commands ac WHERE ac.host_id=h.id AND ac.type='reimage' AND ac.status='done' AND ac.args->>'admin_user' <> ''
@@ -235,7 +248,7 @@ func (s *Server) getHost(w http.ResponseWriter, r *http.Request) {
 		       FROM deployment_jobs j JOIN images i ON i.id=j.image_id JOIN channels ch ON ch.id=i.channel_id
 		       WHERE j.host_id=h.id AND j.status='completed' ORDER BY j.finished_at DESC NULLS LAST LIMIT 1))
 		FROM hosts h LEFT JOIN sites s ON s.id = h.site_id LEFT JOIN channels c ON c.id = h.channel_id WHERE h.id=$1`,
-		id, s.pres.isOnline(id)).Scan(&b)
+		id, s.pres.isOnline(id), s.seenFrom(id)).Scan(&b)
 	if err != nil {
 		s.dbErr(w, err)
 		return
@@ -252,6 +265,7 @@ func (s *Server) agentCommands(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// An open long-poll is how the server knows the machine is online right now.
+	s.seenIP.Store(hostID, clientIP(r))
 	cameOnline, wake := s.pres.begin(hostID)
 	defer s.pres.end(hostID)
 	s.markOnline(hostID, cameOnline)

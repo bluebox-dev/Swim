@@ -271,6 +271,7 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"host_id": hostID})
 		return
 	}
+	s.seenIP.Store(hostID, clientIP(r))
 	s.markOnline(hostID, s.pres.touch(hostID))
 	s.autoUpdateAgent(r.Context(), hostID, in.AgentVersion)
 	s.reconcilePolicy(r.Context(), hostID, in.AgentVersion)

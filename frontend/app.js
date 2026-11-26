@@ -1831,6 +1831,13 @@ const ACTION_GROUPS = [['', 'ทุกการกระทำ'], ['command.', '
   ['auth.', 'เข้าสู่ระบบ'], ['image.', 'Image'], ['task.', 'งานเครื่องต้นแบบ'], ['script.', 'สคริปต์'], ['enrollment_token.', 'ตัวติดตั้ง'], ['commands.clear', 'ล้างประวัติคำสั่ง']];
 let logFilter = { actor: '', host: '', action: '', from: '', to: '', q: '' }, logRows = [];
 const hostName = id => hostList.find(h => h.id === id)?.hostname || '';
+// A machine behind a router (NAT): its agent reaches the server, but the server cannot reach the machine's own address.
+const natOf = h => { const ips = (inv(h).network || []).flatMap(n => n.ipv4 || []); return h.seen_ip && ips.length && !ips.includes(h.seen_ip) ? { seen: h.seen_ip, local: ips[0] } : null; };
+const natWarn = h => { const n = natOf(h); if (!n) return '';
+  const where = `เครื่องใช้ที่อยู่ <span class="mono" translate="no">${esc(n.local)}</span> แต่ server เห็นเป็น <span class="mono" translate="no">${esc(n.seen)}</span>`;
+  return verCmp(h.agent_version || '0', '0.5.24') >= 0
+    ? `<div class="callout" style="margin:0 0 12px">${ic('info')}<div><b>เครื่องนี้อยู่หลัง router (NAT)</b><br>${where} Remote Desktop จะวิ่งผ่านอุโมงค์ที่ Agent เปิดออกมาหา server เอง จึงใช้ได้โดยไม่ต้องตั้งค่า router</div></div>`
+    : `<div class="callout warn" style="margin:0 0 12px">${ic('alert')}<div><b>เครื่องนี้อยู่หลัง router (NAT)</b><br>${where} Agent รุ่นนี้ยังเปิดอุโมงค์ Remote ไม่ได้ รอ Agent อัปเดตเป็น 0.5.24 ก่อน แล้ว Remote จะใช้ได้เอง</div></div>`; };
 const LOGIN_STEP = { password: 'รหัสผ่านผิด', totp: 'รหัสจากแอปผิด', recovery_code: 'รหัสสำรองผิด', setup_code: 'รหัสตอนตั้งค่าแอปผิด', setup_required: 'บัญชีต้องตั้งค่าแอปยืนยันตัวตนใหม่', token: 'token ผิด' };
 // short browser name from a User-Agent ("Chrome บน Windows"); the full text stays in the tooltip
 const uaShort = ua => { if (!ua) return ''; const b = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : /curl|python|Go-http|wget/i.test(ua) ? 'โปรแกรมอัตโนมัติ' : ua.split(/[ /]/)[0];
@@ -2437,7 +2444,7 @@ async function pageHost(id) {
       <div class="cmd-group"><span>เปลี่ยนแปลง</span><div class="btn-group">${btn('update_agent')}${btn('restart_agent')}${btn('reboot')}${btn('run_script')}</div></div>
       <div class="cmd-group"><span>ถอดออก</span><div class="btn-group">${btn('uninstall_agent', 'danger')}
         <button class="btn danger" data-retire ${retired || h.removing_at ? 'disabled' : ''}>${ic('x')}ลบเครื่องออกจากระบบ</button></div></div>`)}
-    ${card('Remote Desktop', 'เห็นและควบคุมหน้าจอของเครื่องนี้ในเบราว์เซอร์', `<div class="remote-box">${rdpBadge(rdp)}
+    ${card('Remote Desktop', 'เห็นและควบคุมหน้าจอของเครื่องนี้ในเบราว์เซอร์', `<div class="remote-box">${rdpBadge(rdp)}${natWarn(h)}
       ${remotePwless(h) ? `<ul class="remote-pts"><li>${ic('check')}<span>กดแล้วเข้าหน้าจอเครื่องได้ทันที ไม่ต้องใส่รหัส</span></li>
         <li>${ic('check')}<span>เข้าด้วยบัญชีผู้ดูแลชั่วคราว <b>swim-remote</b> ที่ SWIM สร้างและปิดเองภายใน 10 นาที</span></li>
         <li>${ic('check')}<span>เปิด Remote Desktop ให้เฉพาะ SWIM server เครื่องอื่นในเครือข่ายเข้าไม่ได้</span></li><li>${ic('check')}<span>ทุกครั้งถูกบันทึกในประวัติการใช้งาน</span></li></ul>`

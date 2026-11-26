@@ -2,6 +2,7 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -9,8 +10,10 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -58,6 +61,7 @@ type Server struct {
 	lv      vm.Libvirt
 	events  *hub
 	pres    *presence
+	seenIP  sync.Map // host id → address its agent last connected from (differs from its own address behind NAT)
 	started time.Time
 }
 
@@ -190,6 +194,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /v1/pe/jobs/{id}/next", s.peNext)
 	m.HandleFunc("GET /v1/pe/jobs/{id}/files/{path...}", s.peFile)
 	m.HandleFunc("POST /v1/agent/commands/{id}/result", s.agentCommandResult)
+	m.HandleFunc("GET /v1/agent/tunnel/{id}", s.agentTunnel)
 	// admin
 	a := s.requireAdmin
 	m.HandleFunc("GET /v1/whoami", a(s.whoami))
@@ -294,6 +299,16 @@ type statusWriter struct {
 }
 
 func (w *statusWriter) WriteHeader(c int) { w.status = c; w.ResponseWriter.WriteHeader(c) }
+
+// Hijack lets a handler take over the connection (the agent's remote tunnel) through the logging wrapper.
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("connection cannot be taken over")
+	}
+	w.status = http.StatusSwitchingProtocols
+	return hj.Hijack()
+}
 
 // Flush keeps Server-Sent Events working through the logging wrapper.
 func (w *statusWriter) Flush() {

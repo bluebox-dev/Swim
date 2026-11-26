@@ -73,12 +73,36 @@ func (s *Server) hostRemote(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.Unmarshal(inv, &nics)
 	addr := ""
+	seen, own := s.seenFrom(hostID), false
 	for _, n := range nics {
 		for _, ip := range n.IPv4 {
+			if ip == seen {
+				own = true
+			}
 			if p := net.ParseIP(ip); p != nil && !p.IsLoopback() && !p.IsLinkLocalUnicast() && addr == "" {
 				addr = ip
 			}
 		}
+	}
+	// Behind a router (NAT) the machine's own address cannot be reached from here. The only
+	// address that can work is the router's, and only if it forwards port 3389 to the machine.
+	nat := seen != "" && addr != "" && !own
+	local := addr
+	// With an agent that can tunnel, the session goes through a connection the agent opens
+	// itself, so it works wherever the agent reaches the server. Older agents: the router's
+	// address, which works only with a port forward.
+	var tun *tunnel
+	// The tunnel is used for every machine whose agent supports it, not only behind NAT: a
+	// machine with its own address can still sit behind a firewall the server cannot pass.
+	if addr != "" && len(xpub) == 32 && !versionLess(agentVer, minTunnelAgent) {
+		t, err := s.openTunnel(hostID, remoteTTL)
+		if err != nil {
+			writeErr(w, http.StatusServiceUnavailable, "SWIM-API-503", err.Error())
+			return
+		}
+		tun = t
+	} else if nat {
+		addr = seen
 	}
 	if addr == "" {
 		writeErr(w, http.StatusConflict, "SWIM-API-409", "this machine has not reported an IP address yet — refresh its inventory first")
@@ -109,8 +133,11 @@ func (s *Server) hostRemote(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusInternalServerError, "SWIM-API-500", "seal: "+err.Error())
 			return
 		}
-		raw, _ := json.Marshal(manifest.RemoteSessionArgs{Sealed: base64.StdEncoding.EncodeToString(sealed), AllowFrom: from,
-			TTLS: int(remoteTTL.Seconds())})
+		rs := manifest.RemoteSessionArgs{Sealed: base64.StdEncoding.EncodeToString(sealed), AllowFrom: from, TTLS: int(remoteTTL.Seconds())}
+		if tun != nil {
+			rs.Tunnel = tun.id
+		}
+		raw, _ := json.Marshal(rs)
 		p, ce = s.planCommand(r.Context(), hostID, "remote_session", raw, "", actor)
 	case in.Enable:
 		body := fmt.Sprintf(`# SWIM: turn Remote Desktop on, reachable only from the SWIM server (%[1]s)
@@ -137,6 +164,12 @@ Set-Service TermService -StartupType Manual; Start-Service TermService -ErrorAct
 		"resize-method": "display-update", "color-depth": "24", "clipboard-encoding": "UTF-8",
 		// show the desktop as the user sees it: Guacamole turns these off by default (black background, flat theme)
 		"enable-wallpaper": "true", "enable-theming": "true", "enable-font-smoothing": "true", "enable-desktop-composition": "true",
+		// Guacamole 1.6 turns the RDP Graphics Pipeline (GFX) on by default; with it the desktop
+		// stayed black after sign-in on real Windows 11 machines. The classic pipeline works.
+		"disable-gfx": "true",
+	}
+	if tun != nil { // guacd reaches the machine through the agent's tunnel on this server
+		params["hostname"], params["port"] = "127.0.0.1", itoa(tun.port)
 	}
 	if passwordless {
 		params["username"], params["password"] = remoteAccount, password
@@ -153,7 +186,7 @@ Set-Service TermService -StartupType Manual; Start-Service TermService -ErrorAct
 		writeErr(w, http.StatusInternalServerError, "SWIM-API-500", err.Error())
 		return
 	}
-	out := map[string]any{"address": addr, "passwordless": passwordless,
+	out := map[string]any{"address": addr, "passwordless": passwordless, "nat": nat, "local_address": local, "tunnel": tun != nil,
 		"url": "/guacamole/#/client/" + base64.StdEncoding.EncodeToString([]byte(name+"\x00c\x00json")) + "?data=" + url.QueryEscape(data)}
 	err = s.inTx(r.Context(), func(tx pgx.Tx) (audit.Entry, error) {
 		data := map[string]any{"address": addr, "passwordless": passwordless, "enable": in.Enable, "username": in.Username}
