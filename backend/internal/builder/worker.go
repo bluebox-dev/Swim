@@ -158,8 +158,10 @@ func (w *Worker) finish(ctx context.Context, id string, result map[string]any, e
 // ───────── capture ─────────
 
 // Default NTFS capture exclusions (same set wimlib/DISM use for a Windows volume),
-// plus the SWIM agent's state: an enrolled agent in the Golden Master must never
-// become the identity of every machine that receives the image (spec 03 §2.1).
+// plus the SWIM agent: its state, because an enrolled agent in the Golden Master must never
+// become the identity of every machine that receives the image (spec 03 §2.1), and its
+// program, because WinPE puts the agent published at install time on every machine. An
+// image therefore never has to be captured again just because a new agent came out.
 const captureConfig = `[ExclusionList]
 \$ntfs.log
 \hiberfil.sys
@@ -170,6 +172,7 @@ const captureConfig = `[ExclusionList]
 \$RECYCLE.BIN
 \Windows\CSC
 \ProgramData\SWIM
+\Program Files\SWIM
 `
 
 func (w *Worker) event(ctx context.Context, imageID, step, status, msg string) {

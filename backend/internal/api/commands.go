@@ -1,11 +1,11 @@
 package api
 
 import (
-	"net"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"

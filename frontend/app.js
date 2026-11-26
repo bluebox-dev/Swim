@@ -3721,11 +3721,11 @@ function setLang(l) { try { localStorage.setItem('swim-lang', l); } catch (e) {}
 // ───────── boot ─────────
 async function boot() {
   if (!i18nReady) { i18nReady = true; await i18nInit(); }
-  if (!pluginsLoaded) { pluginsLoaded = true; await loadPlugins(); }
   if (!authCfg) await loadAuthCfg();
   const setupT = /^#\/setup\?t=([\w-]+)/.exec(location.hash);
   if (setupT && !me) return renderSetup({ setupToken: setupT[1] });
   try { me = me || await api('/v1/whoami'); } catch (e) { return renderLogin(e.status === 401 ? '' : e.message); }
+  if (!pluginsLoaded) { pluginsLoaded = true; await loadPlugins(); } // only for a signed-in administrator
   if (me?.auth === 'session' && me.recovery_left != null && me.recovery_left <= 2) toast(`เหลือรหัสสำรอง ${me.recovery_left} ตัว สร้างชุดใหม่ได้ที่เมนูบัญชี`, 'bad');
   await refreshMeta();
   renderShell();
@@ -3760,7 +3760,7 @@ window.SWIM = { plugin(def) {
 let pluginsLoaded = false;
 async function loadPlugins() {
   let list = [];
-  try { const r = await fetch('/v1/plugins', { headers: { 'X-SWIM': '1' } }); if (r.ok) list = (await r.json()).items || []; } catch (e) { /* no plugins */ }
+  try { list = (await api('/v1/plugins')).items || []; } catch (e) { /* no plugins */ }
   await Promise.all(list.filter(p => p.js).map(p => new Promise(done => {
     if (p.css) document.head.append(Object.assign(document.createElement('link'), { rel: 'stylesheet', href: p.css }));
     document.head.append(Object.assign(document.createElement('script'), { src: p.js, onload: done, onerror: done }));

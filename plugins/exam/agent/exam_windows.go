@@ -60,6 +60,19 @@ func init() {
 			examLog = env.Log
 			examService(ctx, env)
 		},
+		// the agent is being removed: lift every limit exam mode set
+		Uninstall: func(ctx context.Context) string {
+			if !loadExam().On {
+				return ""
+			}
+			examMu.Lock()
+			defer examMu.Unlock()
+			if err := applyExam(ctx, false, contract.ExamConfig{}); err != nil {
+				return "exam mode: could not lift all limits: " + err.Error()
+			}
+			saveExam(examFile{On: false, AppliedAt: time.Now().UTC()}) // the watcher sees it and ends
+			return "exam mode off: browsers, programs and devices are back to normal"
+		},
 		Subcommands: map[string]func([]string) int{
 			// the watcher, started by the service inside the signed-in user's session
 			"exam-watch": func(args []string) int {

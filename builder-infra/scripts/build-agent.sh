@@ -6,7 +6,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/.." && pwd)
 DATA=${SWIM_DATA:-/srv/swim}; OUT=$DATA/storage/agent
 VER=$(grep -E '^const Version' "$ROOT/agent/internal/agent/state.go" | cut -d'"' -f2)
-GO="sudo docker run --rm -v $ROOT:/src -v swim-gocache:/root/.cache -w /src -e CGO_ENABLED=0 golang:1.24-bookworm"
+GO="sudo docker run --rm -v $ROOT:/src -v swim-gocache:/root/.cache -w /src -e CGO_ENABLED=0 golang:1.27-bookworm"
 
 sudo bash "$HERE/scripts/plugin.sh" gen   # link in the plugins named in plugins/enabled
 echo "== vet + test"
@@ -27,3 +27,13 @@ SUM=$(sha256sum "$OUT/$FILE" | cut -d' ' -f1)
 printf '{"version":"%s","file":"%s","sha256":"%s","size_bytes":%s,"built_at":"%s"}\n' \
   "$VER" "$FILE" "$SUM" "$(stat -c %s "$OUT/$FILE")" "$(date -u +%FT%TZ)" | sudo tee "$OUT/latest.json" >/dev/null
 echo "published $FILE ($SUM)"
+
+# WinPE goes out with the agent: when the code of swim-pe (pe/, pkg/, go.mod) changed since
+# the published WinPE was built, build and publish a new one now, so installs never run an
+# older swim-pe than the agent they install. SKIP_WINPE=1 skips it.
+SRC=$(cd "$ROOT" && find pe pkg -type f -name '*.go' | sort | xargs sha256sum | cat - go.mod go.sum | sha256sum | cut -c1-16)
+CUR=$(jq -r '.src // ""' "$DATA/storage/winpe/latest.json" 2>/dev/null || true)
+if [ "${SKIP_WINPE:-}" != 1 ] && [ "$SRC" != "$CUR" ]; then
+  echo "== swim-pe changed since the published WinPE — building WinPE"
+  bash "$HERE/scripts/build-winpe.sh"
+fi

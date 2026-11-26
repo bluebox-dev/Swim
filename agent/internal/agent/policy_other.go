@@ -16,3 +16,5 @@ func setPolicy(context.Context, manifest.SetPolicyArgs) (string, any, error) {
 func signOutStale(context.Context) (string, any, error) {
 	return "", nil, errors.New("install lock exists only on Windows")
 }
+
+func unlockForUninstall(context.Context) string { return "" }

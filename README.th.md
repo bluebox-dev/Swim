@@ -9,7 +9,7 @@
 *Reimage a whole Windows computer lab over the network — no PXE, no USB sticks.*
 
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL%20v3-blue.svg)](LICENSE)
-![Go 1.24](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go&logoColor=white)
+![Go 1.27](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)
 ![Server: Ubuntu 24.04](https://img.shields.io/badge/server-Ubuntu%2024.04-E95420?logo=ubuntu&logoColor=white)
 ![Clients: Windows 11](https://img.shields.io/badge/clients-Windows%2011-0078D4)
 ![Docker Compose](https://img.shields.io/badge/deploy-Docker%20Compose-2496ED?logo=docker&logoColor=white)

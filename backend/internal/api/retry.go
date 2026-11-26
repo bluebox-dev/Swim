@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -26,9 +27,12 @@ import (
 )
 
 type retryPlan struct {
-	ImageID     string           `json:"image_id"`
-	Image       manifest.FileRef `json:"image"`
-	WinPE       manifest.FileRef `json:"winpe"`
+	ImageID string           `json:"image_id"`
+	Image   manifest.FileRef `json:"image"`
+	WinPE   manifest.FileRef `json:"winpe"`
+	// Agent is the agent published when the admin pressed retry: the new Windows gets the
+	// current one, not the one staged when the job began (WinPE older than 0.5.40 ignores it)
+	Agent       manifest.FileRef `json:"agent"`
 	RequestedBy string           `json:"requested_by"`
 	At          time.Time        `json:"at"`
 }
@@ -94,7 +98,12 @@ func (s *Server) retryJob(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "SWIM-API-500", "WinPE for this job: "+err.Error())
 		return
 	}
-	plan, _ := json.Marshal(retryPlan{ImageID: in.ImageID, Image: img, WinPE: pe, RequestedBy: adminFrom(r).Name, At: time.Now().UTC()})
+	var ag struct{ Version, File, SHA256 string }
+	var agent manifest.FileRef
+	if s.readJSONFile("agent/latest.json", &ag) == nil && ag.File != "" {
+		agent = manifest.FileRef{Version: ag.Version, Path: "agent/" + ag.File, SHA256: ag.SHA256}
+	}
+	plan, _ := json.Marshal(retryPlan{ImageID: in.ImageID, Image: img, WinPE: pe, Agent: agent, RequestedBy: adminFrom(r).Name, At: time.Now().UTC()})
 	msg := "waiting for the machine (WinPE) to pick up the retry — image " + img.Version
 	err = s.inTx(r.Context(), func(tx pgx.Tx) (audit.Entry, error) {
 		tag, err := tx.Exec(r.Context(), `UPDATE deployment_jobs SET status='retry', phase='retry', progress=0, message=$2, retry=$3::jsonb,
@@ -215,10 +224,20 @@ func (s *Server) peNext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.events.publish(Event{Type: "job.updated", HostID: hostID, Data: map[string]any{"id": jobID, "status": "pe", "phase": "retry_download"}})
-	writeJSON(w, http.StatusOK, map[string]any{"action": "retry", "image": plan.Image, "winpe": plan.WinPE, "ticket": ticket})
+	// the agent published now, when WinPE picks the retry up (the plan's own is the fallback)
+	agent := plan.Agent
+	var ag struct{ Version, File, SHA256 string }
+	if s.readJSONFile("agent/latest.json", &ag) == nil && ag.File != "" {
+		agent = manifest.FileRef{Version: ag.Version, Path: "agent/" + ag.File, SHA256: ag.SHA256}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"action": "retry", "image": plan.Image, "winpe": plan.WinPE, "agent": agent, "ticket": ticket})
 }
 
-// peFile: WinPE downloads the retry image and its refreshed WinPE (nginx serves the bytes).
+// peAgentFile: the agent builds WinPE may fetch on a retry (the Windows build only).
+var peAgentFile = regexp.MustCompile(`^agent/swim-agent-[0-9]+\.[0-9]+\.[0-9]+-windows-amd64\.exe$`)
+
+// peFile: WinPE downloads the retry image, its refreshed WinPE and the current agent (nginx
+// serves the bytes).
 func (s *Server) peFile(w http.ResponseWriter, r *http.Request) {
 	jobID, _, status, _, ok := s.peJobAuth(w, r)
 	if !ok {
@@ -230,7 +249,7 @@ func (s *Server) peFile(w http.ResponseWriter, r *http.Request) {
 	}
 	rel := path.Clean("/" + r.PathValue("path"))[1:]
 	if strings.Contains(rel, "..") || !(strings.HasPrefix(rel, "images/") || strings.HasPrefix(rel, "winpe/jobs/"+jobID+"/") ||
-		(strings.HasPrefix(rel, "winpe/pe-") && strings.HasSuffix(rel, "/boot.wim"))) {
+		(strings.HasPrefix(rel, "winpe/pe-") && strings.HasSuffix(rel, "/boot.wim")) || peAgentFile.MatchString(rel)) {
 		writeErr(w, http.StatusForbidden, "SWIM-API-403", "not downloadable")
 		return
 	}

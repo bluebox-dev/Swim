@@ -8,7 +8,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	"swim/pkg/manifest"
@@ -30,6 +32,9 @@ type Plugin struct {
 	Service func(ctx context.Context, env PluginEnv)
 	// Subcommands are extra "swim-agent <name>" modes, for helpers the plugin starts itself.
 	Subcommands map[string]func(args []string) int
+	// Uninstall undoes what the plugin changed on the machine; it runs before the agent removes
+	// itself. It returns a line for the command's output.
+	Uninstall func(ctx context.Context) string
 }
 
 // PluginEnv is what a plugin's Service gets.
@@ -157,3 +162,30 @@ func RequestInventory() { requestInventory() }
 
 // Exec builds a command the way the agent runs its own helpers.
 var Exec = command
+
+// undoBeforeUninstall lifts the install lock and lets every plugin undo its changes.
+func undoBeforeUninstall(ctx context.Context) string {
+	var lines []string
+	if out := unlockForUninstall(ctx); out != "" {
+		lines = append(lines, out)
+	}
+	pluginMu.Lock()
+	list := append([]Plugin(nil), plugins...)
+	pluginMu.Unlock()
+	for _, p := range list {
+		if p.Uninstall == nil {
+			continue
+		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					lines = append(lines, fmt.Sprintf("plugin %s: %v", p.Name, r))
+				}
+			}()
+			if out := p.Uninstall(ctx); out != "" {
+				lines = append(lines, out)
+			}
+		}()
+	}
+	return strings.Join(lines, "\n")
+}

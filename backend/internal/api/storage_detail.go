@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -81,6 +82,15 @@ func (s *Server) storageBreakdown(r *http.Request) ([]storageCategory, error) {
 	for _, id := range ids {
 		keepJob[id] = true
 	}
+	// agent builds those jobs install (a job keeps the agent it staged until a retry)
+	keepAgent := map[string]bool{}
+	if rows, err := s.pool.Query(r.Context(), `SELECT DISTINCT c.args->'agent'->>'path' FROM agent_commands c JOIN deployment_jobs j ON j.id = c.args->>'job_id'
+		WHERE c.type='reimage' AND (j.finished_at IS NULL OR j.status IN ('failed','aborted')) AND c.args->'agent'->>'path' IS NOT NULL`); err == nil {
+		paths, _ := pgx.CollectRows(rows, pgx.RowTo[string])
+		for _, p := range paths {
+			keepAgent[strings.TrimSuffix(path.Base(p), "-windows-amd64.exe")] = true
+		}
+	}
 	jobOf := func(name string) string {
 		if i := strings.Index(name, "job_"); i >= 0 {
 			id := name[i:]
@@ -150,6 +160,8 @@ func (s *Server) storageBreakdown(r *http.Request) ([]storageCategory, error) {
 		switch {
 		case cur != "" && build == cur:
 			it.Note = "published"
+		case keepAgent[build]:
+			it.Note = "used by an install that is not finished or may be retried"
 		case prev == "" || build == prev:
 			prev, it.Note = build, "previous build"
 		default:

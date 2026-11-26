@@ -138,10 +138,10 @@ func (s *Server) pluginRoutes(m *http.ServeMux) {
 		}
 		list = append(list, it)
 	}
-	// names and versions only: the console needs it before sign-in to load the plugin scripts
-	m.HandleFunc("GET /v1/plugins", func(w http.ResponseWriter, r *http.Request) {
+	// which plugins are linked in is nobody's business before sign-in
+	m.HandleFunc("GET /v1/plugins", s.requireAdmin(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"items": list})
-	})
+	}))
 }
 
 // pluginHeartbeat and pluginHourly are the two places the core calls into plugins. A plugin

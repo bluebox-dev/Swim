@@ -211,6 +211,7 @@ type retryPlan struct {
 	Action string  `json:"action"`
 	Image  fileRef `json:"image"`
 	WinPE  fileRef `json:"winpe"`
+	Agent  fileRef `json:"agent"` // the agent published now; it replaces the one staged when the job began
 	Ticket string  `json:"ticket"`
 }
 
@@ -296,6 +297,23 @@ func doRetry(plan retryPlan) {
 			report("failed", "retry_download", 0, "retry: replace WinPE: "+err.Error(), "error")
 			_ = os.Remove(planPath)
 			return
+		}
+	}
+	// the agent the new Windows gets: the current one. If it cannot be fetched, the staged one
+	// stays — it updates itself on its first contact with the server.
+	if plan.Agent.Path != "" && plan.Agent.SHA256 != "" {
+		tmp := filepath.Join(root, "swim", "agent", "swim-agent.exe.new")
+		if err := download(plan.Agent, tmp, "agent "+plan.Agent.Version); err != nil {
+			logf("retry: keeping the staged agent (%v)", err)
+			_ = os.Remove(tmp)
+		} else {
+			dst := filepath.Join(root, "swim", "agent", "swim-agent.exe")
+			_ = os.Remove(dst)
+			if err := os.Rename(tmp, dst); err != nil {
+				logf("retry: replace agent: %v", err)
+			} else {
+				report("", "retry_download", 1, "the new Windows gets agent "+plan.Agent.Version, "info")
+			}
 		}
 	}
 	job.Image = fileRef{Version: plan.Image.Version, Path: plan.Image.Path, SHA256: plan.Image.SHA256, Size: plan.Image.Size}

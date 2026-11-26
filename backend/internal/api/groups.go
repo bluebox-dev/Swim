@@ -279,6 +279,10 @@ func (s *Server) createCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Reason = strings.TrimSpace(in.Reason)
+	if _, ok := plugin.CommandOf(in.Type); ok {
+		writeErr(w, http.StatusBadRequest, "SWIM-API-400", in.Type+" is sent from its plugin's page, which also records what each machine should be in")
+		return
+	}
 	actor := "user:" + adminFrom(r).Name
 	var ts *toolScript
 	if in.Type == "run_script" { // from outside: a tool or a saved script, never script text
@@ -328,6 +332,10 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	in.Reason = strings.TrimSpace(in.Reason)
 	if _, ok := manifest.CommandTypes[in.Type]; !ok {
 		writeErr(w, http.StatusBadRequest, "SWIM-API-400", "unknown command type (allowlist only)")
+		return
+	}
+	if _, ok := plugin.CommandOf(in.Type); ok {
+		writeErr(w, http.StatusBadRequest, "SWIM-API-400", in.Type+" is sent from its plugin's page, which also records what each machine should be in")
 		return
 	}
 	var target map[string]any

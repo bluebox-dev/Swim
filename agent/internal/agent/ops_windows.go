@@ -83,11 +83,18 @@ func msiProductCode() string {
 func osUninstall() error {
 	exe, _ := os.Executable()
 	binDir := filepath.Dir(exe)
-	script := filepath.Join(os.TempDir(), "swim-uninstall.cmd")
+	// a name nobody can guess: in the shared Windows Temp folder a user could otherwise create
+	// the file first, keep write access to it, and have SYSTEM run what they put in it
+	f, err := os.CreateTemp("", "swim-uninstall-*.cmd")
+	if err != nil {
+		return err
+	}
+	script := f.Name()
+	f.Close()
 	pc := msiProductCode()
 	lines := []string{
 		"@echo off",
-		`set LOG=%WINDIR%\Temp\swim-uninstall.log`,
+		`set LOG=` + strings.TrimSuffix(script, ".cmd") + `.log`, // as unguessable as the script
 		`echo %date% %time% SWIM uninstall started (msi=` + pc + `) > "%LOG%"`,
 		"ping -n 6 127.0.0.1 >nul",
 	}

@@ -55,7 +55,6 @@ func parseLayout(buf []byte) (ps []part, mbr bool, err error) {
 	return ps, mbr, nil
 }
 
-
 const typeESPGUID = "c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
 
 // partByID finds a partition by its identity (GPT GUID or "mbr-…" name), ignoring case and braces.

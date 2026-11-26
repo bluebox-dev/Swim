@@ -385,7 +385,10 @@ func execute(ctx context.Context, ec *execCtx, cmd manifest.Command) (string, an
 		out, err := wake(a.MACs)
 		return out, nil, nil, err
 	case "uninstall_agent":
-		return "uninstall scheduled — the agent, its service and its data will be removed", nil, nil, nil
+		// what SWIM changed on the machine is undone while the agent still can: once it is gone,
+		// nothing could give the users their administrator rights back or lift the limits
+		undone := undoBeforeUninstall(ctx)
+		return strings.TrimSpace(undone + "\nuninstall scheduled — the agent, its service and its data will be removed"), nil, nil, nil
 	}
 	return "", nil, nil, errors.New("unsupported command")
 }

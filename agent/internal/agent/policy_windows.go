@@ -476,3 +476,17 @@ func signOutAfter(wait time.Duration, stale []staleSession) {
 	}
 	requestInventory()
 }
+
+// unlockForUninstall restores the administrators the install lock demoted and Windows' own
+// settings, when the lock is or was on. Returns "" when there was nothing to undo.
+func unlockForUninstall(ctx context.Context) string {
+	p := loadPolicy()
+	if !p.InstallLock && len(p.Removed) == 0 {
+		return ""
+	}
+	out, _, err := applyPolicy(ctx, false, p.Keep)
+	if err != nil {
+		return "install lock: could not undo it all: " + err.Error()
+	}
+	return "install lock lifted: " + strings.ReplaceAll(out, "\n", "; ")
+}
