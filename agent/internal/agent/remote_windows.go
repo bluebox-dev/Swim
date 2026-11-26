@@ -113,6 +113,7 @@ Set-Service TermService -StartupType Manual; Start-Service TermService -ErrorAct
 // disableRemoteAccount closes the door again; also run at agent start, because a
 // restart loses the timer.
 func disableRemoteAccount(lg interface{ Printf(string, ...any) }) {
+	signOutLeftoverRemote(lg)
 	out, err := ps(context.Background(), time.Minute, fmt.Sprintf(
 		`if (Get-LocalUser -Name '%[1]s' -ErrorAction SilentlyContinue | Where-Object Enabled) { Disable-LocalUser -Name '%[1]s'; 'disabled' }`, remoteAccount))
 	if err != nil {
@@ -208,32 +209,78 @@ func lockConsole(ctx context.Context, id int) error {
 
 var watching atomic.Bool
 
-// watchConsole keeps the remote admin in control while swim-remote is enabled: if someone
-// signs in at the machine again (which would disconnect the admin), they get the notice and
-// their session is disconnected again.
+// watchConsole looks after the machine for the length of a remote session.
+//
+// While the admin is CONNECTED (the swim-remote session is Active) someone signing in at
+// the machine would throw the admin out, so that person gets the notice and their session
+// is disconnected again (their work stays open). As soon as the admin leaves — the browser
+// tab is closed, so the swim-remote session is merely "disconnected" — that session is
+// signed out. A session left behind kept this watcher sending the person at the machine
+// away for the rest of the 10-minute window, so they could not get back to their desktop.
 func watchConsole(lg interface{ Printf(string, ...any) }) {
 	if !watching.CompareAndSwap(false, true) {
 		return
 	}
 	defer watching.Store(false)
 	ctx := context.Background()
-	for time.Now().Unix() < remoteUntil.Load() {
+	idle := 0 // consecutive checks with the admin's session present but not connected
+	for {
 		time.Sleep(5 * time.Second)
-		ss := sessions(ctx)
-		admin := false
-		for _, s := range ss {
+		var admin *winSession
+		for _, s := range sessions(ctx) {
 			if strings.EqualFold(s.User, remoteAccount) {
-				admin = true
+				s := s
+				admin = &s
 			}
 		}
-		if !admin {
+		if admin == nil {
+			idle = 0
+			if time.Now().Unix() >= remoteUntil.Load() {
+				return // window over and nobody is connected
+			}
 			continue
 		}
+		if !strings.EqualFold(admin.State, "Active") {
+			// the admin left; give a reconnect (page reload) 15 seconds, then sign the session out
+			if idle++; idle >= 3 {
+				if err := logoffSession(ctx, admin.ID); err != nil {
+					lg.Printf("remote session: could not sign out the left-over %s session: %v", remoteAccount, err)
+				} else {
+					lg.Printf("remote session: admin left; %s signed out, the machine is free again", remoteAccount)
+					requestInventory()
+				}
+				idle = 0
+			}
+			continue
+		}
+		idle = 0
 		if u, id, ok := consoleUser(ctx); ok && !strings.EqualFold(u, remoteAccount) {
 			if err := lockConsole(ctx, id); err != nil {
 				lg.Printf("remote takeover: could not disconnect %s: %v", u, err)
 			} else {
 				lg.Printf("remote takeover: %s signed in at the machine during a remote session; disconnected again", u)
+			}
+		}
+	}
+}
+
+func logoffSession(ctx context.Context, id int) error {
+	c, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	if out, err := command(c, "logoff.exe", strconv.Itoa(id)).CombinedOutput(); err != nil {
+		return fmt.Errorf("logoff: %v %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// signOutLeftoverRemote signs out a swim-remote session nobody is connected to (agent start,
+// end of the window): it would otherwise sit on the machine with the account already disabled.
+func signOutLeftoverRemote(lg interface{ Printf(string, ...any) }) {
+	ctx := context.Background()
+	for _, s := range sessions(ctx) {
+		if strings.EqualFold(s.User, remoteAccount) && !strings.EqualFold(s.State, "Active") {
+			if err := logoffSession(ctx, s.ID); err == nil {
+				lg.Printf("remote session: left-over %s session signed out", remoteAccount)
 			}
 		}
 	}

@@ -254,7 +254,7 @@ $st = Get-Volume | Where-Object { $_.FileSystemLabel -eq '%s' } | Select-Object 
 if (-not $st) { '{"freed":0,"grew":0}'; return }
 $sp = Get-Partition -Volume $st
 $os = Get-Partition -DriveLetter C
-if ($sp.IsBoot -or $sp.IsSystem -or $sp.Guid -eq $os.Guid) { throw "refusing to delete: the staging label is on a system partition" }
+if ($sp.IsBoot -or $sp.IsSystem -or $sp.IsActive -or ($sp.DiskNumber -eq $os.DiskNumber -and $sp.PartitionNumber -eq $os.PartitionNumber)) { throw "refusing to delete: the staging label is on a system partition" }
 $freed = $sp.Size
 Remove-Partition -DiskNumber $sp.DiskNumber -PartitionNumber $sp.PartitionNumber -Confirm:$false
 $grew = 0

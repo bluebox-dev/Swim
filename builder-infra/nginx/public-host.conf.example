@@ -1,0 +1,38 @@
+# Public name of this SWIM server (reached from the internet through a reverse proxy).
+#
+# From the internet only machines are served: the agent API, SWIM WinPE, agent downloads and
+# the up/down health answer. The admin console, the admin API, sign-in and Guacamole are NOT
+# reachable under this name — administrators use the internal address (or a VPN). Every
+# request here still needs a host token or a per-job token; nothing is open by itself.
+#
+# Copy to public-host.conf, set server_name, and point the reverse proxy at
+# https://<this server>:443 (scheme https, websocket support on).
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name swim.example.org;
+
+    ssl_certificate     /etc/nginx/certs/server.crt;
+    ssl_certificate_key /etc/nginx/certs/server.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_tickets off;
+
+    include /etc/nginx/conf.d/security-headers.inc;
+    client_max_body_size 50m;
+
+    include /etc/nginx/conf.d/agent-locations.inc;
+
+    location = /v1/health {
+        proxy_pass http://127.0.0.1:8090;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Authorization "";   # never the detailed answer from outside
+        proxy_set_header Cookie "";
+    }
+
+    location / {
+        include /etc/nginx/conf.d/security-headers.inc;
+        default_type text/plain;
+        return 403 "SWIM: this address serves enrolled machines only. The admin console is available on the internal network.\n";
+    }
+}

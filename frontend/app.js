@@ -612,6 +612,20 @@ function askStorageCleanup() {
 
 // ───────── remote desktop in the browser (Guacamole), through the server only ─────────
 // agents from 0.5.15 open the session with a one-time account, no password prompt
+// Guacamole keeps its sign-in in this browser. A link from an earlier remote session leaves a
+// token behind whose one-time data has expired; the next link then opened on that stale
+// sign-in and Guacamole answered "tunnel destination does not exist" (a blank page with
+// nothing to press). Sign that old session out first, so every link signs in afresh.
+async function guacSignOut() {
+  try {
+    for (const k of ['GUAC_AUTH_TOKEN', 'GUAC_AUTH']) {
+      const v = localStorage.getItem(k); if (!v) continue;
+      let t = v; try { const j = JSON.parse(v); t = typeof j === 'string' ? j : j?.authToken || ''; } catch (e) {}
+      if (t && /^[A-Za-z0-9]+$/.test(t)) await fetch('/guacamole/api/tokens/' + t, { method: 'DELETE' }).catch(() => {});
+      localStorage.removeItem(k);
+    }
+  } catch (e) {}
+}
 const MIN_PWLESS = '0.5.15';
 const remotePwless = h => !!h.agent_version && verCmp(h.agent_version, MIN_PWLESS) >= 0;
 function askRemote() {
@@ -642,6 +656,7 @@ function askRemote() {
             await new Promise(res => setTimeout(res, 1500));
           }
         }
+        await guacSignOut();
         if (w) w.location = r.url; else window.open(r.url, '_blank');
         toast(`เปิดหน้าจอ ${h.hostname} ในแท็บใหม่แล้ว`); renderPage();
       } catch (e) { if (w) w.close(); throw e; }
@@ -670,6 +685,7 @@ const PRESETS = [
   {"id":"service","g":"ระบบ","icon":"refresh","label":"จัดการ Service","fields":"<div class=\"row-fields\"><div class=\"field\"><label>ชื่อ Service</label><input class=\"input\" name=\"svc\" required autocomplete=\"off\" placeholder=\"เช่น Spooler\"></div>\n      <div class=\"field\"><label>ทำอะไร</label><select class=\"select\" name=\"act\"><option value=\"Restart\">รีสตาร์ต</option><option value=\"Start\">เริ่ม</option><option value=\"Stop\">หยุด</option></select></div>\n      <div class=\"field\"><label>เริ่มอัตโนมัติ</label><select class=\"select\" name=\"st\"><option value=\"\">ไม่เปลี่ยน</option><option value=\"Automatic\">อัตโนมัติ</option><option value=\"Manual\">ด้วยตนเอง</option><option value=\"Disabled\">ปิดใช้งาน</option></select></div></div>"},
   {"id":"wu-check","g":"ระบบ","icon":"search","label":"ตรวจ Windows Update","view":true},
   {"id":"wu-install","g":"ระบบ","icon":"capture","label":"ติดตั้ง Windows Update","desc":"ดาวน์โหลดและติดตั้งอัปเดตทั้งหมด (อาจใช้เวลานาน) — ไม่รีบูตเอง ระบบจะบอกถ้าต้องรีบูต"},
+  {"id":"uefi-check","g":"ระบบ","icon":"search","label":"ตรวจความพร้อม UEFI / Windows 11","view":true},
   {"id":"rename","g":"ระบบ","icon":"hosts","label":"เปลี่ยนชื่อเครื่อง","desc":"ชื่อใหม่มีผลหลังรีบูต","fields":"<div class=\"field\"><label>ชื่อใหม่ <small class=\"mute\">(A–Z, 0–9, ขีด; ไม่เกิน 15 ตัว)</small></label><input class=\"input mono\" name=\"nn\" required pattern=\"[A-Za-z0-9-]{1,15}\" autocomplete=\"off\"></div>\n      <label class=\"check\"><input type=\"checkbox\" name=\"rb\"> รีบูตเครื่องหลังเปลี่ยนชื่อ (ใน 1 นาที)</label>"},
   {"id":"time","g":"ระบบ","icon":"clock","label":"ตั้งเวลา / โซนเวลา","fields":"<div class=\"field\"><label>โซนเวลา</label><select class=\"select\" name=\"tz\"><option value=\"SE Asia Standard Time\">กรุงเทพ (UTC+7)</option><option value=\"\">ไม่เปลี่ยน</option>\n      <option value=\"Singapore Standard Time\">สิงคโปร์ (UTC+8)</option><option value=\"Tokyo Standard Time\">โตเกียว (UTC+9)</option><option value=\"UTC\">UTC</option></select></div>\n      <label class=\"check\"><input type=\"checkbox\" name=\"sync\" checked> ซิงก์นาฬิกากับ time server ตอนนี้</label>"},
   {"id":"rdp-off","g":"ระบบ","icon":"shield","label":"ปิด Remote Desktop","desc":"ปิด Remote Desktop และกฎ firewall ที่เปิดไว้ให้ SWIM server"},
@@ -686,7 +702,7 @@ const TOOL_HINT = {
   msg: 'ขึ้นข้อความบนหน้าจอผู้ใช้', users: 'บัญชีในเครื่องและผู้ดูแล', useradd: 'บัญชีใหม่ บังคับเปลี่ยนรหัสครั้งแรก', userpw: 'ตั้งรหัสชั่วคราวให้บัญชี', userstate: 'อนุญาตหรือห้ามล็อกอิน',
   apps: 'รายชื่อ เวอร์ชัน และผู้ผลิต', uninstall: 'ถอนแบบเงียบ ไม่ถามผู้ใช้', procs: '80 โปรเซสที่ใช้หน่วยความจำมากสุด', kill: 'บังคับปิดตามชื่อหรือ PID',
   services: 'ทุก Service และสถานะ', service: 'เริ่ม หยุด รีสตาร์ต ตั้งค่าเริ่มอัตโนมัติ', 'wu-check': 'อัปเดตที่ยังไม่ได้ติดตั้ง', 'wu-install': 'ดาวน์โหลดและติดตั้งทั้งหมด',
-  rename: 'มีผลหลังรีบูต', time: 'โซนเวลาและซิงก์นาฬิกา', 'rdp-off': 'ปิดและปิดกฎ firewall',
+  rename: 'มีผลหลังรีบูต', 'uefi-check': 'โหมดบูต ดิสก์ MBR/GPT TPM และ CPU', time: 'โซนเวลาและซิงก์นาฬิกา', 'rdp-off': 'ปิดและปิดกฎ firewall',
   ipconfig: 'ipconfig /all', ping: 'ping / ทดสอบ port', dns: 'ipconfig /flushdns',
   disk: 'ขนาดและพื้นที่ว่างทุกไดรฟ์', temp: 'Windows\\Temp และ Temp ผู้ใช้', hiber: 'ปิดเพื่อคืนพื้นที่ขนาดเท่า RAM',
 };
@@ -2978,7 +2994,10 @@ function runSummary(o) {
     <div class="rs-counts">${running ? `<span class="c-run"><i></i>กำลังทำ ${running} เครื่อง</span>` : ''}<span class="c-ok"><i></i>เสร็จ ${ok}</span>${fail ? `<span class="c-bad"><i></i>ไม่สำเร็จ ${fail}</span>` : ''}</div></div>`;
 }
 // the install agent reports its steps in English; show the common ones in plain Thai
-const MSG_TH = [[/^the restart came back into the old Windows instead of SWIM WinPE.*\(attempt (\d+) of (\d+)\).*$/i, 'เครื่องบูตกลับเข้า Windows เดิม ระบบสั่งบูตเข้า WinPE ใหม่เอง (ครั้งที่ $1 จาก $2)'], [/^the machine restarted into the old Windows instead of SWIM WinPE (\d+) times in a row.*$/i, 'เครื่องบูตกลับเข้า Windows เดิม $1 ครั้งติดกัน ไม่ได้เข้า WinPE ไม่มีอะไรถูกแก้ในเครื่อง ลองสั่งใหม่ได้'], [/^the machine restarted into the old Windows instead of SWIM WinPE.*answer file was removed.*$/i, 'เครื่องบูตกลับเข้า Windows เดิม ไม่มีอะไรถูกแก้ ต้องสั่งล้างเครื่องและติดตั้งใหม่ (ใส่รหัสผ่านผู้ดูแลอีกครั้ง)'], [/^new Windows is up \((.+?)\),? agent re-enrolled.*$/i, 'Windows ใหม่บูตแล้ว ($1) agent กลับมาเชื่อมต่อแล้ว'], [/^server busy serving other machines.*$/i, 'server กำลังส่งให้เครื่องอื่น รอคิวดาวน์โหลด'],
+const MSG_TH = [[/^this machine boots in legacy BIOS mode.*$/i, 'เครื่องนี้บูตแบบ Legacy BIOS (ดิสก์ MBR) ซึ่งรองรับเฉพาะแบบ "คง Partition เดิม" ให้เลือกตัวเลือกดิสก์นั้นแล้วสั่งใหม่'],
+  [/^.*boots from the Windows partition itself.*$/i, 'เครื่อง BIOS เครื่องนี้บูตจาก partition ของ Windows โดยตรง (ไม่มี System Reserved แยก) ซึ่ง SWIM ยังไม่รองรับ ไม่มีอะไรถูกแก้ในเครื่อง'],
+  [/^.*already has 4 primary partitions.*$/i, 'ดิสก์ MBR ของเครื่องนี้มีครบ 4 partition แล้ว จึงสร้างพื้นที่พักไฟล์ไม่ได้ ไม่มีอะไรถูกแก้ในเครื่อง'],
+  [/^.*re-partitioning is not supported on legacy BIOS.*$/i, 'ดิสก์ MBR แบบ Legacy BIOS รองรับเฉพาะแบบ "คง Partition เดิม" ไม่มีอะไรถูกแก้ในเครื่อง'], [/^this machine does not boot in UEFI mode.*$/i, 'เครื่องนี้บูตแบบ Legacy BIOS ซึ่ง SWIM ยังติดตั้งให้ไม่ได้ ต้องเปลี่ยนเครื่องเป็นโหมด UEFI ก่อน (ดูเครื่องมือ "ตรวจความพร้อม UEFI / Windows 11") ไม่มีอะไรถูกแก้ในเครื่อง'], [/^the restart came back into the old Windows instead of SWIM WinPE.*\(attempt (\d+) of (\d+)\).*$/i, 'เครื่องบูตกลับเข้า Windows เดิม ระบบสั่งบูตเข้า WinPE ใหม่เอง (ครั้งที่ $1 จาก $2)'], [/^the machine restarted into the old Windows instead of SWIM WinPE (\d+) times in a row.*$/i, 'เครื่องบูตกลับเข้า Windows เดิม $1 ครั้งติดกัน ไม่ได้เข้า WinPE ไม่มีอะไรถูกแก้ในเครื่อง ลองสั่งใหม่ได้'], [/^the machine restarted into the old Windows instead of SWIM WinPE.*answer file was removed.*$/i, 'เครื่องบูตกลับเข้า Windows เดิม ไม่มีอะไรถูกแก้ ต้องสั่งล้างเครื่องและติดตั้งใหม่ (ใส่รหัสผ่านผู้ดูแลอีกครั้ง)'], [/^new Windows is up \((.+?)\),? agent re-enrolled.*$/i, 'Windows ใหม่บูตแล้ว ($1) agent กลับมาเชื่อมต่อแล้ว'], [/^server busy serving other machines.*$/i, 'server กำลังส่งให้เครื่องอื่น รอคิวดาวน์โหลด'],
   [/^the machine restarted into the old Windows instead of SWIM WinPE.*$/i, 'เครื่องรีสตาร์ตกลับเข้า Windows เดิม ไม่ได้เข้า WinPE ไม่มีอะไรถูกแก้ในเครื่อง ลองสั่งใหม่ได้'],[/^downloading image (\S+):?\s*(.*)$/i, 'กำลังดาวน์โหลด image $1 $2'], [/^using (?:the )?(?:stored|local|prestaged) image (\S+).*$/i, 'ใช้ image $1 ที่เก็บไว้ในเครื่อง ไม่ต้องดาวน์โหลด'],
   [/^applying image (\S+):?\s*(.*)$/i, 'กำลังติดตั้ง image $1 $2'], [/^rebooting into (?:SWIM )?WinPE.*$/i, 'กำลังรีบูตเข้า WinPE'], [/^verifying image.*$/i, 'กำลังตรวจ image'],
   [/^partitioning.*$/i, 'กำลังแบ่งดิสก์'], [/^injecting drivers.*$/i, 'กำลังใส่ไดรเวอร์และ agent'], [/^first boot.*$/i, 'Windows กำลังบูตครั้งแรก'],
@@ -3542,7 +3561,7 @@ document.addEventListener('click', async ev => {
   }
   if (act === 'console') {
     const win = window.open('about:blank', '_blank');
-    try { const { url } = await api(base + 'console', 'POST', {}); if (win) win.location = url; else location.href = url; }
+    try { const { url } = await api(base + 'console', 'POST', {}); await guacSignOut(); if (win) win.location = url; else location.href = url; }
     catch (e) { win && win.close(); toast(e.message, 'bad'); }
     return;
   }

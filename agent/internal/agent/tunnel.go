@@ -18,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -85,6 +86,9 @@ func runTunnel(c *Client, tok, id, target string, until time.Time, lg interface{
 				if err == nil {
 					fails = 0
 					continue
+				}
+				if strings.Contains(err.Error(), "HTTP 404") {
+					return // replaced by a newer session or the window is over
 				}
 				if fails++; fails > 20 {
 					lg.Printf("remote tunnel %s: giving up: %v", id, err)

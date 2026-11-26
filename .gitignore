@@ -26,3 +26,7 @@ node_modules/
 .vscode/
 .claude/
 *.swp
+
+# ── site-specific nginx files (public name, trusted proxies) ──
+builder-infra/nginx/public-host.conf
+builder-infra/nginx/*.local.inc

@@ -56,6 +56,9 @@ type JobFile struct {
 	// Windows boot counter at hand-off: a different value later means the machine restarted
 	// (does not depend on the clock, which some machines get wrong after a reboot)
 	WinBootID int64 `json:"win_boot_id,omitempty"`
+	// "bios": legacy BIOS on an MBR disk (partition ids are "mbr-<signature>-<offset>", esp_guid
+	// is the active system partition); empty or "uefi": UEFI on GPT
+	Firmware string `json:"firmware,omitempty"`
 	// how many times this job has restarted towards WinPE (1 = the first hand-off)
 	HandoffTries int `json:"handoff_tries,omitempty"`
 }
@@ -174,9 +177,16 @@ func (j *reimageJob) run(ctx context.Context) error {
 	if j.event("staging", "preflight", pct(1), "checking this machine", "info") {
 		return errCancelled
 	}
-	// 1. preflight: UEFI + BitLocker
-	if out, err := runCmd(ctx, time.Minute, "bcdedit", "/enum", "{current}"); err != nil || !strings.Contains(strings.ToLower(out), "winload.efi") {
-		return errors.New("this machine does not boot in UEFI mode — SWIM WinPE needs UEFI")
+	// 1. preflight: firmware mode + BitLocker
+	fw := firmwareMode(ctx)
+	switch {
+	case fw == "":
+		return errors.New("cannot tell how this machine boots (neither winload.efi nor winload.exe in the boot configuration)")
+	case fw == "bios" && j.a.Disk.Mode != "refresh":
+		return errors.New("this machine boots in legacy BIOS mode (MBR disk): only \"keep the partitions\" is supported there — choose that disk option")
+	}
+	if fw == "bios" {
+		j.event("", "preflight", nil, "legacy BIOS / MBR disk: the install uses BIOS boot files", "info")
 	}
 	if out, _ := runCmd(ctx, time.Minute, "manage-bde", "-status", "C:"); strings.Contains(out, "Protection On") {
 		if _, err := runCmd(ctx, time.Minute, "manage-bde", "-protectors", "-disable", "C:", "-RebootCount", "3"); err != nil {
@@ -250,7 +260,7 @@ func (j *reimageJob) run(ctx context.Context) error {
 	oldBoot, _ := runCmd(ctx, time.Minute, "bcdedit", "/v", "/enum", "{current}")
 	jf := JobFile{JobID: j.a.JobID, Server: j.ec.st.Server, Pin: j.ec.st.Pin, PEToken: j.sec.PEToken, Ticket: j.sec.Ticket,
 		Image: j.a.Image, ImageFile: imgRel, Disk: j.a.Disk, StagingGUID: vol.GUID, OSGUID: vol.OSGUID, ESPGUID: vol.ESPGUID,
-		OldBootID: guidRe.FindString(oldBoot), Hostname: j.a.Hostname, CreatedAt: time.Now().UTC(), WinBootID: winBootID()}
+		OldBootID: guidRe.FindString(oldBoot), Hostname: j.a.Hostname, CreatedAt: time.Now().UTC(), WinBootID: winBootID(), Firmware: fw}
 	jobDir := filepath.Join(j.root, "swim", "job")
 	_ = os.RemoveAll(jobDir)
 	if err := os.MkdirAll(jobDir, 0o700); err != nil {
@@ -291,12 +301,24 @@ func (j *reimageJob) ensureStaging(ctx context.Context, need int64) (*stagingVol
 	script := fmt.Sprintf(`
 $need = %d * 1GB
 $os = Get-Partition -DriveLetter C
-$esp = Get-Partition -DiskNumber $os.DiskNumber | Where-Object { $_.GptType -eq '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}' } | Select-Object -First 1
+$disk = Get-Disk -Number $os.DiskNumber
+$mbr = "$($disk.PartitionStyle)" -eq 'MBR'
+if ($mbr) {
+  # legacy BIOS: the "system" partition is the active one; partitions have no GUID, so they are
+  # named by disk signature and byte offset (the same name swim-pe computes in WinPE)
+  $esp = Get-Partition -DiskNumber $os.DiskNumber | Where-Object IsActive | Select-Object -First 1
+  if (-not $esp) { throw "no active (boot) partition on the system disk" }
+  if ($esp.PartitionNumber -eq $os.PartitionNumber) { throw "this BIOS machine boots from the Windows partition itself (no separate System Reserved partition) - not supported" }
+} else {
+  $esp = Get-Partition -DiskNumber $os.DiskNumber | Where-Object { $_.GptType -eq '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}' } | Select-Object -First 1
+}
+function PartId($p) { if ($mbr) { 'mbr-{0:x8}-{1}' -f [uint32]$disk.Signature, $p.Offset } else { [string]$p.Guid } }
 $st = Get-Volume | Where-Object { $_.FileSystemLabel -eq '%s' } | Select-Object -First 1
 $created = $false
 if (-not $st) {
   $sup = Get-PartitionSupportedSize -DriveLetter C
   if (($os.Size - $sup.SizeMin) -lt ($need + 10GB)) { throw "not enough free space on C: to create a $([int]($need/1GB)) GB staging partition" }
+  if ($mbr -and @(Get-Partition -DiskNumber $os.DiskNumber | Where-Object { $_.MbrType -ne 5 -and $_.MbrType -ne 15 }).Count -ge 4) { throw "the MBR disk already has 4 primary partitions - there is no slot for the staging partition" }
   Resize-Partition -DriveLetter C -Size ($os.Size - $need)
   $p = New-Partition -DiskNumber $os.DiskNumber -Size ($need - 16MB) -AssignDriveLetter
   $null = Format-Volume -Partition $p -FileSystem NTFS -NewFileSystemLabel '%s' -Confirm:$false
@@ -306,7 +328,8 @@ if (-not $st) {
 $sp = Get-Partition -Volume $st
 if (-not $sp.DriveLetter -or $sp.DriveLetter -eq [char]0) { $sp | Add-PartitionAccessPath -AssignDriveLetter; $sp = Get-Partition -Volume $st }
 if ($sp.Size -lt ($need - 64MB)) { throw "existing staging partition is too small ($([int]($sp.Size/1GB)) GB, need $([int]($need/1GB)) GB)" }
-[pscustomobject]@{ letter=[string]$sp.DriveLetter; guid=$sp.Guid; size=$sp.Size; os=$os.Guid; esp=$esp.Guid; created=$created } | ConvertTo-Json -Compress`,
+$os = Get-Partition -DriveLetter C
+[pscustomobject]@{ letter=[string]$sp.DriveLetter; guid=(PartId $sp); size=$sp.Size; os=(PartId $os); esp=(PartId $esp); created=$created } | ConvertTo-Json -Compress`,
 		needGB, stagingLabel, stagingLabel)
 	j.event("", "staging", pct(2), fmt.Sprintf("preparing %d GB staging partition (shrinking C: if needed)", needGB), "info")
 	out, err := ps(ctx, 10*time.Minute, script)
@@ -512,6 +535,22 @@ func (j *reimageJob) driversAndWinPE(ctx context.Context) (manifest.FileRef, err
 	return ref, nil
 }
 
+// firmwareMode tells how the running Windows was started: "uefi", "bios" (legacy BIOS on an
+// MBR disk) or "" when the boot configuration cannot be read.
+func firmwareMode(ctx context.Context) string {
+	out, err := runCmd(ctx, time.Minute, "bcdedit", "/enum", "{current}")
+	if err != nil {
+		return ""
+	}
+	switch l := strings.ToLower(out); {
+	case strings.Contains(l, "winload.efi"):
+		return "uefi"
+	case strings.Contains(l, "winload.exe"):
+		return "bios"
+	}
+	return ""
+}
+
 // bootIntoPE creates the RAM-disk WinPE entry and sets it as a ONE-TIME boot.
 // If anything goes wrong before swim-pe passes the point of no return, the
 // next reboot lands back in this Windows.
@@ -520,6 +559,10 @@ func (j *reimageJob) bootIntoPE(ctx context.Context, letter string) error {
 }
 
 func configurePEBoot(ctx context.Context, letter string) error {
+	loader := `\windows\system32\boot\winload.efi`
+	if firmwareMode(ctx) == "bios" {
+		loader = `\windows\system32\boot\winload.exe`
+	}
 	dev := "ramdisk=[" + letter + `:]\swim\winpe\boot.wim,{ramdiskoptions}`
 	_, _ = runCmd(ctx, time.Minute, "bcdedit", "/delete", peEntry, "/f")
 	// "bcdedit /enum {ramdiskoptions}" exits 0 even when the object is missing, so just
@@ -531,7 +574,7 @@ func configurePEBoot(ctx context.Context, letter string) error {
 		{"/create", peEntry, "/d", "SWIM WinPE", "/application", "osloader"},
 		{"/set", peEntry, "device", dev},
 		{"/set", peEntry, "osdevice", dev},
-		{"/set", peEntry, "path", `\windows\system32\boot\winload.efi`},
+		{"/set", peEntry, "path", loader},
 		{"/set", peEntry, "systemroot", `\windows`},
 		{"/set", peEntry, "winpe", "yes"},
 		{"/set", peEntry, "detecthal", "yes"},

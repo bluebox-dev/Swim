@@ -329,6 +329,25 @@ if ($acct -and $acct.Enabled) { Disable-LocalUser -Name 'swim-remote' }
 'บัญชี swim-remote: ' + $(if (-not $acct) { 'ไม่มี' } else { 'ปิดใช้งานแล้ว' })
 if ($deny -ne 1 -or $open -gt 0) { exit 1 }`
 	}},
+	// read-only: can this machine boot in UEFI mode (needed by SWIM WinPE and by Windows 11)?
+	"uefi-check": {build: func(p *toolParams) (string, string) {
+		return "ตรวจความพร้อม UEFI และ Windows 11", `$loader = (bcdedit.exe /enum '{current}' | Select-String 'winload') -join ' '
+'Firmware ที่ Windows บูตอยู่: ' + $(if ($loader -match 'winload\.efi') { 'UEFI' } elseif ($loader -match 'winload\.exe') { 'Legacy BIOS' } else { 'ไม่ทราบ' })
+$d = Get-Disk | Where-Object IsBoot | Select-Object -First 1
+'ดิสก์ระบบ: disk ' + $d.Number + ', ' + $d.PartitionStyle + ', ' + [math]::Round($d.Size/1GB) + ' GB, ' + @(Get-Partition -DiskNumber $d.Number).Count + ' partition'
+Get-Partition -DiskNumber $d.Number | Select-Object PartitionNumber,DriveLetter,@{n='GB';e={[math]::Round($_.Size/1GB,1)}},Type,IsActive ` + psTable("*") + `
+'--- แปลงดิสก์เป็น GPT ได้ไหม (mbr2gpt /validate ไม่แก้อะไรในเครื่อง) ---'
+if ($d.PartitionStyle -eq 'MBR') {
+  & "$env:SystemRoot\System32\mbr2gpt.exe" /validate /disk:$($d.Number) /allowFullOS 2>&1 | Out-String
+  'ผล: ' + $(if ($LASTEXITCODE -eq 0) { 'แปลงเป็น GPT ได้' } else { 'แปลงไม่ได้ (exit ' + $LASTEXITCODE + ')' })
+} else { 'ดิสก์เป็น GPT อยู่แล้ว' }
+'--- ข้อกำหนดของ Windows 11 ---'
+'CPU: ' + (Get-CimInstance Win32_Processor | Select-Object -First 1).Name
+'RAM: ' + [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1GB,1) + ' GB'
+$tpm = Get-CimInstance -Namespace root\cimv2\Security\MicrosoftTpm -ClassName Win32_Tpm -ErrorAction SilentlyContinue
+'TPM: ' + $(if ($tpm) { ($tpm.SpecVersion -split ',')[0] } else { 'ไม่มี' })
+'Secure Boot: ' + $(try { if (Confirm-SecureBootUEFI) { 'เปิด' } else { 'ปิด' } } catch { 'ใช้ไม่ได้ในโหมด Legacy BIOS' })`
+	}},
 	// ── เครือข่าย
 	"ipconfig": {build: func(p *toolParams) (string, string) { return "ipconfig /all", "ipconfig.exe /all" }},
 	"ping": {build: func(p *toolParams) (string, string) {

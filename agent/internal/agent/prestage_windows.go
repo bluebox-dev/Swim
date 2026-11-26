@@ -131,8 +131,15 @@ func prestageImage(ec *execCtx, a manifest.PrestageArgs) (string, error) {
 func runPrestage(ec *execCtx, a manifest.PrestageArgs) error {
 	ctx := context.Background()
 	j := &reimageJob{ec: ec, quiet: true, a: manifest.ReimageArgs{Image: a.Image}}
+	// The console reads the progress from the inventory, which is otherwise sent only every few
+	// minutes: the bar stood still and the download looked stuck. Send it as the download moves.
+	lastPct, lastAt := -10, time.Time{}
 	j.onProgress = func(p int) {
 		setPrestage(prestageStatus{Version: a.Image.Version, ImageID: a.ImageID, State: "downloading", Progress: p})
+		if p-lastPct >= 3 || time.Since(lastAt) > 45*time.Second {
+			lastPct, lastAt = p, time.Now()
+			requestInventory()
+		}
 	}
 	vol, err := j.ensureStaging(ctx, a.Image.Size+3<<30)
 	if err != nil {

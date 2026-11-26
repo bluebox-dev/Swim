@@ -96,6 +96,32 @@ sudo sshd -t && sudo systemctl reload ssh
 
 Replace the self-signed TLS certificate with one from your organisation's CA before production use.
 
+## Publishing SWIM on a public name
+
+For machines outside the internal network, put a reverse proxy with a public name in front of SWIM.
+
+1. Copy `builder-infra/nginx/public-host.conf.example` to `public-host.conf` and set `server_name` to the public
+   name. Under that name only machines are served (agent API, WinPE, agent downloads, up/down health). The admin
+   console, the admin API, sign-in and Guacamole answer 403 there: administrators keep using the internal address.
+2. List the proxy's address in `builder-infra/nginx/trusted-proxies.local.inc` (`set_real_ip_from <address>;`), so
+   rate limits, lockouts and the activity log see the real visitor instead of the proxy. Only list proxies you operate.
+3. Point the reverse proxy at `https://<server>:443` (scheme **https**, websocket/upgrade support on). Forwarding to
+   port 80 loops, because port 80 only redirects to HTTPS.
+4. `sudo docker exec swim-nginx-1 nginx -t && sudo docker exec swim-nginx-1 nginx -s reload`
+
+Both files are site-specific and listed in `.gitignore`.
+
+## Legacy BIOS machines
+
+Machines that boot in Legacy BIOS mode from an MBR disk can be reinstalled since agent 0.5.26.
+
+- Only the mode that keeps the existing partitions is supported. The disk is not converted to GPT.
+- The disk needs a separate active system partition with at least 8 MB free, and room for one more
+  primary partition (MBR allows four) unless the staging partition already exists.
+- WinPE and the new Windows are started with the BIOS boot files (`winload.exe`, `bcdboot /f BIOS`).
+- A machine that reaches the server only through a VPN is silent while WinPE runs and until the VPN
+  is connected in the new Windows. The job then closes by itself.
+
 ## Troubleshooting
 
 | Symptom | Where to look |

@@ -87,6 +87,32 @@ sudo sshd -t && sudo systemctl reload ssh
 
 ใช้ใบรับรอง TLS จาก CA ของหน่วยงานแทน self-signed เมื่อขึ้นใช้งานจริง
 
+## เปิดใช้ SWIM ผ่านชื่อโดเมนสาธารณะ
+
+สำหรับเครื่องลูกที่อยู่นอกเครือข่ายภายใน ให้วาง reverse proxy ที่มีชื่อโดเมนสาธารณะไว้หน้า SWIM
+
+1. คัดลอก `builder-infra/nginx/public-host.conf.example` เป็น `public-host.conf` แล้วตั้ง `server_name` เป็นชื่อสาธารณะ
+   ภายใต้ชื่อนี้ระบบให้บริการเฉพาะเครื่องลูก (API ของ agent, WinPE, ไฟล์ agent และ health แบบย่อ) ส่วน console ของผู้ดูแล,
+   API ของผู้ดูแล, หน้าเข้าสู่ระบบ และ Guacamole ตอบ 403 ผู้ดูแลยังใช้ที่อยู่ภายในเหมือนเดิม
+2. ใส่ที่อยู่ของ proxy ใน `builder-infra/nginx/trusted-proxies.local.inc` (`set_real_ip_from <ที่อยู่>;`) เพื่อให้การจำกัดความถี่,
+   การพักบัญชี และประวัติการใช้งานเห็น IP จริงของผู้เข้าใช้ ใส่เฉพาะ proxy ที่คุณดูแลเอง
+3. ตั้ง reverse proxy ให้ส่งต่อไปที่ `https://<server>:443` (scheme **https** และเปิด websocket/upgrade) ถ้าส่งไปพอร์ต 80 จะวนไม่จบ
+   เพราะพอร์ต 80 มีไว้ส่งต่อไป HTTPS เท่านั้น
+4. `sudo docker exec swim-nginx-1 nginx -t && sudo docker exec swim-nginx-1 nginx -s reload`
+
+ไฟล์ทั้งสองเป็นค่าเฉพาะของแต่ละที่ และอยู่ใน `.gitignore` แล้ว
+
+## เครื่องที่บูตแบบ Legacy BIOS
+
+เครื่องที่บูตแบบ Legacy BIOS จากดิสก์ MBR ลง Windows ใหม่ได้ตั้งแต่ agent 0.5.26
+
+- รองรับเฉพาะโหมดคง partition เดิม ระบบไม่แปลงดิสก์เป็น GPT
+- ดิสก์ต้องมี system partition แบบ active แยกต่างหาก มีที่ว่างอย่างน้อย 8 MB และต้องเหลือที่สำหรับ
+  primary partition อีกหนึ่งตัว (MBR มีได้สี่ตัว) ยกเว้นมี partition พักไฟล์อยู่แล้ว
+- WinPE และ Windows ใหม่บูตด้วยไฟล์บูตแบบ BIOS (`winload.exe`, `bcdboot /f BIOS`)
+- เครื่องที่เข้าถึง server ผ่าน VPN เท่านั้นจะเงียบระหว่าง WinPE ทำงาน และเงียบต่อจนกว่าจะต่อ VPN
+  ใน Windows ใหม่ จากนั้น job จะปิดเอง
+
 ## แก้ปัญหา
 
 | อาการ | ดูที่ไหน |

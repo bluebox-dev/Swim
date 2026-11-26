@@ -140,7 +140,7 @@ swim logs --export D:\swim-logs.zip
 | ID | Check | Level |
 |---|---|---|
 | P-01 | On AC power (when a battery exists) and battery ≥ 30% | **BLOCK** |
-| P-02 | UEFI + GPT | **BLOCK** |
+| P-02 | UEFI + GPT, or Legacy BIOS + MBR with a separate active system partition (keep-partitions mode only) | **BLOCK** |
 | P-03 | Architecture matches the channel | **BLOCK** |
 | P-04 | OS disk ≥ `min_disk_gb` | **BLOCK** |
 | P-05 | The published `boot.wim` has this model's storage driver (answered by the server from the driver matrix) | **BLOCK** |

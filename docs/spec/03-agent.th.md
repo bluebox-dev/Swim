@@ -141,7 +141,7 @@ swim logs --export D:\swim-logs.zip
 | ID | ตรวจ | ระดับ |
 |---|---|---|
 | P-01 | เสียบไฟ AC (ถ้ามีแบต) และแบต ≥ 30% | **BLOCK** |
-| P-02 | UEFI + GPT | **BLOCK** |
+| P-02 | UEFI + GPT หรือ Legacy BIOS + MBR ที่มี system partition แบบ active แยกต่างหาก (เฉพาะโหมดคง partition เดิม) | **BLOCK** |
 | P-03 | arch ตรง channel | **BLOCK** |
 | P-04 | ดิสก์ OS ≥ `min_disk_gb` | **BLOCK** |
 | P-05 | มี storage driver ของรุ่นนี้ใน `boot.wim` ที่ published (server ตอบจาก driver matrix) | **BLOCK** |

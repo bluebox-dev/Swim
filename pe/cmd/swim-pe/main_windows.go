@@ -12,7 +12,6 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -34,7 +33,7 @@ import (
 
 const (
 	peEntry  = "{5a1f0c3e-0000-4000-8000-5717aa000001}"
-	typeESP  = "c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
+	typeESP  = typeESPGUID
 	typeMSR  = "e3c9e316-0b5c-4db8-817d-f92df00215ae"
 	maxTries = 2 // attempts after the point of no return
 )
@@ -66,6 +65,9 @@ type jobFile struct {
 	ESPGUID     string      `json:"esp_guid"`
 	OldBootID   string      `json:"old_boot_id"`
 	Hostname    string      `json:"hostname"`
+	// "bios" = legacy BIOS on an MBR disk: partitions are named "mbr-<disk signature>-<offset>",
+	// "esp_guid" is the active system partition and boot files are written for BIOS.
+	Firmware string `json:"firmware,omitempty"`
 }
 
 type status struct {
@@ -87,7 +89,23 @@ var (
 	httpc   *http.Client
 	netOK   bool
 	started = time.Now()
+	bios    bool // the system disk is MBR and the machine boots through legacy BIOS
 )
+
+// bcdStore is the boot configuration of the installed system on the mounted system partition (Y:).
+func bcdStore() string {
+	if bios {
+		return `Y:\Boot\BCD`
+	}
+	return `Y:\EFI\Microsoft\Boot\BCD`
+}
+
+func firmwareArg() string {
+	if bios {
+		return "BIOS"
+	}
+	return "UEFI"
+}
 
 func logf(format string, a ...any) {
 	line := fmt.Sprintf("%s  %s", time.Now().Format("15:04:05"), fmt.Sprintf(format, a...))
@@ -481,7 +499,19 @@ func main() {
 	}
 	esp, osp := partByGUID(parts, job.ESPGUID), partByGUID(parts, job.OSGUID)
 	if esp == nil || (job.Disk.Mode == "refresh" && osp == nil && !st.PONR) {
-		abort("EFI or Windows partition not found on disk " + fmt.Sprint(disk))
+		abort("system (boot) or Windows partition not found on disk " + fmt.Sprint(disk))
+	}
+	if bios {
+		logf("legacy BIOS / MBR disk: boot files go to partition %d as BIOS boot files", esp.Number)
+		// On BIOS only "keep the partitions, format Windows" is supported, and the boot files
+		// must live on their own partition: formatting Windows would otherwise take the boot
+		// menu with it and a power cut would leave nothing to start from.
+		if job.Disk.Mode != "refresh" {
+			abort("re-partitioning is not supported on legacy BIOS (MBR) disks — choose to keep the partitions")
+		}
+		if osp != nil && osp.Number == esp.Number {
+			abort("this BIOS machine boots from the Windows partition itself (no separate system partition) — not supported")
+		}
 	}
 	if !st.PONR {
 		report("pe", "verify", 3, "verifying image SHA-256 ("+job.Image.Version+")", "info")
@@ -504,11 +534,24 @@ func main() {
 	// 4. point of no return: from here WinPE is the default boot so a power cut resumes here
 	if _, err := diskpart(fmt.Sprintf("select disk %d\nselect partition %d\nremove all noerr\nassign letter=Y noerr\n", disk, esp.Number)); err != nil {
 		if !st.PONR {
-			abort("cannot mount EFI partition: " + err.Error())
+			abort("cannot mount the system (boot) partition: " + err.Error())
 		}
-		fail("cannot mount EFI partition: " + err.Error())
+		fail("cannot mount the system (boot) partition: " + err.Error())
 	}
-	store := `Y:\EFI\Microsoft\Boot\BCD`
+	store := bcdStore()
+	if _, err := os.Stat(store); err != nil && !st.PONR {
+		abort("boot configuration not found at " + store)
+	}
+	if bios && !st.PONR {
+		// the new Windows' boot files must fit on the (often 50 MB) system partition
+		var free, total, totalFree uint64
+		if yp, _ := windows.UTF16PtrFromString(`Y:\`); windows.GetDiskFreeSpaceEx(yp, &free, &total, &totalFree) == nil {
+			logf("system partition: %d MB, %d MB free", total>>20, totalFree>>20)
+			if totalFree < 8<<20 {
+				abort(fmt.Sprintf("the system (boot) partition has only %d MB free — not enough for the new boot files", totalFree>>20))
+			}
+		}
+	}
 	if _, err := run(time.Minute, "bcdedit.exe", "/store", store, "/default", peEntry); err != nil {
 		if !st.PONR {
 			abort("cannot set WinPE as default boot: " + err.Error())
@@ -576,6 +619,12 @@ func main() {
 		out, err := run(30*time.Minute, `W:\Windows\System32\Dism.exe`, "/Image:W:\\", "/Add-Driver", `/Driver:X:\swim\drivers`, "/Recurse",
 			`/ScratchDir:W:\`, "/English")
 		if err != nil {
+			// the new image's DISM may not run in a WinPE of an older Windows (e.g. Windows 11
+			// installed from a Windows 10 recovery environment): try this WinPE's own DISM
+			logf("DISM of the new image failed (%v) — trying the WinPE's DISM", err)
+			out, err = run(30*time.Minute, "dism.exe", "/Image:W:\\", "/Add-Driver", `/Driver:X:\swim\drivers`, "/Recurse", `/ScratchDir:W:\`, "/English")
+		}
+		if err != nil {
 			fail("inject drivers: " + err.Error())
 		}
 		logf("%s", lastLines(out, 6))
@@ -589,8 +638,8 @@ func main() {
 	// 8. boot files for the new Windows; drop the WinPE entry
 	st.Phase = "boot_config"
 	saveStatus()
-	if _, err := run(5*time.Minute, `W:\Windows\System32\bcdboot.exe`, `W:\Windows`, "/s", "Y:", "/f", "UEFI"); err != nil {
-		if _, err2 := run(5*time.Minute, "bcdboot.exe", `W:\Windows`, "/s", "Y:", "/f", "UEFI"); err2 != nil {
+	if _, err := run(5*time.Minute, `W:\Windows\System32\bcdboot.exe`, `W:\Windows`, "/s", "Y:", "/f", firmwareArg()); err != nil {
+		if _, err2 := run(5*time.Minute, "bcdboot.exe", `W:\Windows`, "/s", "Y:", "/f", firmwareArg()); err2 != nil {
 			fail("bcdboot: " + err.Error())
 		}
 	}
@@ -612,6 +661,9 @@ func main() {
 // bootNextWindows sets UEFI BootNext to the "Windows Boot Manager" firmware entry that
 // bcdboot registered for the system disk. Returns false when no such entry was found.
 func bootNextWindows() bool {
+	if bios {
+		return true // BIOS has no firmware boot entries: the disk's boot manager starts its default, the new Windows
+	}
 	out, err := run(time.Minute, "bcdedit.exe", "/enum", "firmware", "/v")
 	if err != nil {
 		logf("bcdedit /enum firmware: %v", err)
@@ -822,21 +874,7 @@ func injectAgent() error {
 
 // ───────── disk layout (IOCTL_DISK_GET_DRIVE_LAYOUT_EX) ─────────
 
-type part struct {
-	Number         int
-	Offset, Length uint64
-	Type, ID       string
-}
-
-func partByGUID(ps []part, g string) *part {
-	g = strings.Trim(strings.ToLower(g), "{}")
-	for i := range ps {
-		if ps[i].ID == g {
-			return &ps[i]
-		}
-	}
-	return nil
-}
+func partByGUID(ps []part, g string) *part { return partByID(ps, g) }
 
 func largestData(ps []part) *part {
 	var best *part
@@ -852,11 +890,6 @@ func largestData(ps []part) *part {
 	return best
 }
 
-func guidString(b []byte) string {
-	return fmt.Sprintf("%08x-%04x-%04x-%x-%x", binary.LittleEndian.Uint32(b[0:4]), binary.LittleEndian.Uint16(b[4:6]),
-		binary.LittleEndian.Uint16(b[6:8]), b[8:10], b[10:16])
-}
-
 func layout(n int) ([]part, error) {
 	name, _ := windows.UTF16PtrFromString(fmt.Sprintf(`\\.\PhysicalDrive%d`, n))
 	h, err := windows.CreateFile(name, windows.GENERIC_READ, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, 0, 0)
@@ -869,21 +902,8 @@ func layout(n int) ([]part, error) {
 	if err := windows.DeviceIoControl(h, 0x00070050, nil, 0, &buf[0], uint32(len(buf)), &ret, nil); err != nil {
 		return nil, err
 	}
-	if binary.LittleEndian.Uint32(buf[0:4]) != 1 { // PARTITION_STYLE_GPT
-		return nil, errors.New("not a GPT disk")
-	}
-	count := int(binary.LittleEndian.Uint32(buf[4:8]))
-	var ps []part
-	for i := 0; i < count && 48+(i+1)*144 <= len(buf); i++ {
-		e := buf[48+i*144 : 48+(i+1)*144]
-		num := int(binary.LittleEndian.Uint32(e[24:28]))
-		if num == 0 {
-			continue
-		}
-		ps = append(ps, part{Number: num, Offset: binary.LittleEndian.Uint64(e[8:16]), Length: binary.LittleEndian.Uint64(e[16:24]),
-			Type: guidString(e[32:48]), ID: guidString(e[48:64])})
-	}
-	return ps, nil
+	ps, _, err := parseLayout(buf)
+	return ps, err
 }
 
 func findDisk(stagingGUID string) (int, []part, error) {
@@ -895,8 +915,9 @@ func findDisk(stagingGUID string) (int, []part, error) {
 		}
 		for _, p := range ps {
 			if p.ID == want {
+				bios = strings.HasPrefix(p.ID, "mbr-")
 				for _, q := range ps {
-					logf("disk %d partition %d: %.1f GB type %s id %s", n, q.Number, float64(q.Length)/(1<<30), q.Type[:8], q.ID)
+					logf("disk %d partition %d: %.1f GB type %.8s id %s", n, q.Number, float64(q.Length)/(1<<30), q.Type, q.ID)
 				}
 				return n, ps, nil
 			}

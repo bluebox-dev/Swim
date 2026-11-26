@@ -133,8 +133,9 @@ func TestToolsMatchFormerBrowserScripts(t *testing.T) {
 			t.Errorf("%s %v differs\n got name %q timeout %d\nwant name %q timeout %d\n got body:\n%s\nwant body:\n%s", c.Tool, c.Params, ts.Name, ts.Timeout, c.Name, c.Timeout, ts.Body, c.Body)
 		}
 	}
+	addedLater := map[string]bool{"uefi-check": true} // tools written on the server, never generated in the browser
 	for id := range tools {
-		if !seen[id] {
+		if !seen[id] && !addedLater[id] {
 			t.Errorf("tool %s has no fixture", id)
 		}
 	}
