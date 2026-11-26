@@ -1,100 +1,112 @@
-# คู่มือดูแลระบบ SWIM
+# SWIM operations guide
 
-## ที่อยู่ของสิ่งต่าง ๆ บน server
+**English** · [ไทย](OPERATIONS.th.md)
 
-| Path | เนื้อหา |
+## Where things live on the server
+
+| Path | Contents |
 |---|---|
-| `/opt/swim` | โค้ด (repository นี้) |
-| `/opt/swim/builder-infra/.env` | รหัสลับของระบบ (สิทธิ์ 0600 ไม่อยู่ใน Git) |
-| `/srv/swim/storage/` | image, WinPE, ไฟล์ agent, log ของงาน |
-| `/srv/swim/keys/` | กุญแจเซ็นคำสั่งและกุญแจเข้ารหัสตารางงาน |
-| `/srv/swim/certs/` | ใบรับรอง TLS |
-| `/srv/swim/vms/` | ดิสก์ของเครื่องต้นแบบ, `iso/` สำหรับ ISO |
-| `/srv/swim/audit-archive/` | ไฟล์ประวัติการใช้งานที่เก็บถาวร |
-| Docker volume `swim_pgdata` | ฐานข้อมูล PostgreSQL |
+| `/opt/swim` | The code (this repository) |
+| `/opt/swim/builder-infra/.env` | System secrets (mode 0600, not in Git) |
+| `/srv/swim/storage/` | Images, WinPE, agent binaries, task logs |
+| `/srv/swim/keys/` | Command-signing key and schedule encryption key |
+| `/srv/swim/certs/` | TLS certificate |
+| `/srv/swim/vms/` | Golden master disks, `iso/` for Windows ISOs |
+| `/srv/swim/audit-archive/` | Archived activity log files |
+| Docker volume `swim_pgdata` | PostgreSQL database |
 
-## อัปเดตระบบ
+## Updating the system
 
-ก่อนทุกครั้ง ตรวจว่าไม่มีงานติดตั้งหรือ capture ค้างอยู่ (หน้าแรกของ console) การรีสตาร์ต backend ระหว่างติดตั้งทำให้งานสะดุด
-และห้ามรีสตาร์ต container `builder` ระหว่าง capture
+Before every update, check that no installation or capture is running (console home page).
+Restarting the backend interrupts running installations, and the `builder` container must never be
+restarted during a capture.
 
 ```bash
 cd /opt/swim && git pull
 cd builder-infra
 
-# backend เปลี่ยน
+# backend changed
 sudo docker compose build backend && sudo docker compose up -d --no-deps backend
 
-# nginx.conf เปลี่ยน
+# nginx.conf changed
 sudo docker exec swim-nginx-1 nginx -t && sudo docker exec swim-nginx-1 nginx -s reload
 
-# หน้าเว็บเปลี่ยน: ไม่ต้องทำอะไร nginx อ่านไฟล์จาก ../frontend โดยตรง
-# (เปลี่ยนเลข ?v= ใน frontend/index.html ทุกครั้งที่แก้ app.js หรือ app.css)
+# console changed: nothing to do, nginx serves ../frontend directly
+# (bump the ?v= value in frontend/index.html whenever app.js or app.css changes)
 ```
 
-Migration ของฐานข้อมูลรันเองตอน backend สตาร์ต
+Database migrations run automatically when the backend starts.
 
-## ออก agent รุ่นใหม่
+## Releasing a new agent
 
-1. เพิ่มเลขรุ่นใน `agent/internal/agent/state.go` (`const Version`)
-2. `./builder-infra/scripts/build-agent.sh` รัน vet และ test แล้วเผยแพร่ไฟล์กับ `latest.json`
-3. เครื่องลูกที่ออนไลน์อัปเดตตัวเองภายในไม่กี่นาที (ตรวจ SHA-256 ก่อนสลับ และย้อนกลับเองถ้ารุ่นใหม่สตาร์ตไม่ได้)
-   เครื่องที่มีงานติดตั้งค้างอยู่จะรอจนงานจบ
+1. Raise the version in `agent/internal/agent/state.go` (`const Version`).
+2. Run `./builder-infra/scripts/build-agent.sh`. It runs vet and tests, then publishes the binary
+   and `latest.json`.
+3. Online clients update themselves within minutes. They verify the SHA-256 before switching and
+   roll back if the new version does not start. Machines with an open installation wait until it ends.
 
-ถ้าแก้ `pe/` ให้รัน `./builder-infra/scripts/build-winpe.sh` ด้วย
+If `pe/` changed, also run `./builder-infra/scripts/build-winpe.sh`.
 
-## สำรองข้อมูล
+## Backup
 
-สิ่งที่ต้องสำรองเพื่อกู้ระบบได้ครบ:
+What you need to restore the system completely:
 
 ```bash
-# ฐานข้อมูล
+# database
 sudo docker exec swim-postgres-1 pg_dump -U swim_owner -Fc swim > swim-$(date +%F).dump
 
-# รหัสลับและกุญแจ (เก็บในที่ปลอดภัย แยกจาก Git)
+# secrets and keys (store them somewhere safe, outside Git)
 sudo tar czf swim-secrets-$(date +%F).tgz /opt/swim/builder-infra/.env /srv/swim/keys /srv/swim/certs
 ```
 
-ถ้ากุญแจใน `/srv/swim/keys/` หาย agent ที่ติดตั้งไปแล้วจะไม่เชื่อคำสั่งจาก server ตัวใหม่ ต้องติดตั้ง agent ใหม่ทุกเครื่อง
-ถ้าใบรับรอง TLS เปลี่ยน ลายนิ้วมือที่ agent ตรึงไว้จะไม่ตรง ต้องติดตั้ง agent ใหม่เช่นกัน
-image ใน `/srv/swim/storage/images/` สร้างใหม่ได้จากเครื่องต้นแบบ จะสำรองหรือไม่ก็ได้
+If the keys in `/srv/swim/keys/` are lost, installed agents will not trust commands from the new
+server and every agent must be reinstalled. If the TLS certificate changes, the fingerprint pinned
+by the agents no longer matches and they must be reinstalled as well. Images in
+`/srv/swim/storage/images/` can be rebuilt from the golden master, so backing them up is optional.
 
-## ความปลอดภัย
+## Security
 
-- **เข้าระบบ** ชื่อผู้ใช้ รหัสผ่าน และรหัสจากแอปยืนยันตัวตน (TOTP) ผิด 5 ครั้งบัญชีถูกพัก 15 นาที ผิด 20 ครั้งจาก IP เดียวถูกพัก 15 นาที
-- **Admin token ใน `.env`** ใช้เข้าระบบได้โดยไม่ผ่าน 2FA เก็บไว้ใช้ยามฉุกเฉินและสำหรับสคริปต์บน server เท่านั้น
-- **ลืมรหัสหรือมือถือหาย** ผู้ดูแลคนอื่นกด "รีเซ็ตการยืนยันตัวตน" หรือรันบน server:
-  `sudo docker exec swim-backend-1 swim-server user reset-2fa <username>` จะได้ลิงก์ตั้งค่าใหม่
-- **คำสั่งถึงเครื่องลูก** เซ็นด้วย Ed25519 ทุกคำสั่ง agent ตรวจลายเซ็น อายุคำสั่ง และกันการส่งซ้ำ
-- **เครื่องมือบนเครื่องลูก** สคริปต์ของเครื่องมือสำเร็จรูปเขียนและตรวจค่าบน server (`backend/internal/api/tools.go`)
-  API ไม่รับข้อความสคริปต์จากภายนอก และปิดการบันทึกสคริปต์ใหม่ผ่าน API
-- **ประวัติการใช้งาน** แก้หรือลบตรง ๆ ไม่ได้ เก็บ 90 วันแล้วระบบลบเอง (`SWIM_AUDIT_KEEP_DAYS` ขั้นต่ำ 30)
-  การเข้าระบบไม่สำเร็จบันทึก IP ชื่อที่กรอก และเบราว์เซอร์ ไม่บันทึกรหัสผ่านที่กรอก
-- **nginx** บังคับ TLS 1.2 ขึ้นไป ส่ง security header (CSP, HSTS, กัน iframe) และจำกัดความถี่ของการเข้าระบบ
+- **Sign-in.** User name, password and an authenticator code (TOTP). 5 failures suspend the account
+  for 15 minutes; 20 failures from one IP address suspend that address for 15 minutes.
+- **Admin tokens in `.env`.** They sign in without the second factor. Keep them for emergencies and
+  for scripts on the server only.
+- **Lost password or phone.** Another administrator presses "Reset sign-in", or run on the
+  server `sudo docker exec swim-backend-1 swim-server user reset-2fa <username>` to get a new setup link.
+- **Commands to clients.** Every command is signed with Ed25519. The agent checks the signature,
+  the validity window and replays.
+- **Tools on clients.** The script of every built-in tool is written and validated on the server
+  (`backend/internal/api/tools.go`). The API accepts no script text from outside, and saving new
+  scripts through the API is closed.
+- **Activity log.** It cannot be edited or deleted directly. Entries are kept for 90 days and then
+  removed automatically (`SWIM_AUDIT_KEEP_DAYS`, minimum 30). Failed sign-ins record the IP address,
+  the name that was typed and the browser, never the password that was typed.
+- **nginx.** TLS 1.2 or newer, security headers (CSP, HSTS, no framing) and rate limiting on sign-in.
 
-สิ่งที่ควรทำเพิ่มบน server จริง (สคริปต์ติดตั้งไม่ได้ทำให้ เพราะอาจทำให้เข้า server ไม่ได้):
+Recommended on a real server (the install script does not do this, because it could lock you out):
 
 ```bash
-# ปิดการเข้า SSH ด้วยรหัสผ่าน (ต้องมี key ใน ~/.ssh/authorized_keys ก่อน)
+# disable SSH password login (make sure your key is in ~/.ssh/authorized_keys first)
 printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\n' | sudo tee /etc/ssh/sshd_config.d/00-swim-hardening.conf
 sudo sshd -t && sudo systemctl reload ssh
 ```
 
-ใช้ใบรับรอง TLS จาก CA ของหน่วยงานแทน self-signed เมื่อขึ้นใช้งานจริง
+Replace the self-signed TLS certificate with one from your organisation's CA before production use.
 
-## แก้ปัญหา
+## Troubleshooting
 
-| อาการ | ดูที่ไหน |
+| Symptom | Where to look |
 |---|---|
-| หน้าเว็บเข้าไม่ได้ | `sudo docker compose ps`, `sudo docker compose logs nginx backend` |
-| เครื่องลูกไม่ขึ้นในระบบ | บนเครื่องลูก `C:\ProgramData\SWIM\logs\agent.log` และ `"C:\Program Files\SWIM\swim-agent.exe" status` |
-| งาน capture ล้มเหลว | ปุ่ม log ของงานในหน้า Images หรือ `/srv/swim/storage/logs/tasks/<task_id>.log` |
-| งานติดตั้งล้มเหลว | หน้าเครื่อง → แท็บ Windows → รายละเอียดของงาน (มี log การบูตแนบ) |
-| พื้นที่ server ใกล้เต็ม | หน้า พื้นที่ server |
+| The console does not load | `sudo docker compose ps`, `sudo docker compose logs nginx backend` |
+| A client does not appear | On the client: `C:\ProgramData\SWIM\logs\agent.log` and `"C:\Program Files\SWIM\swim-agent.exe" status` |
+| A capture task fails | The task's log button on the Images page, or `/srv/swim/storage/logs/tasks/<task_id>.log` |
+| An installation fails | Machine page → Windows tab → job details (boot diagnostics are attached) |
+| Server storage is filling up | The Server storage page |
 
-## ปัญหาที่รู้อยู่
+## Known issues
 
-**เครื่องเสมือนบน KubeVirt บูตกลับเข้า Windows เดิมแทน WinPE** พบบน VM ทดสอบเมื่อ 26 พ.ย. 2026:
-ตอนที่ VM เริ่มบูต WinPE แพลตฟอร์มสร้าง VM ขึ้นใหม่ทั้งตัว (TPM ถูกล้าง นาฬิกาและค่า Secure Boot ถูกรีเซ็ต)
-เครื่องจึงกลับเข้า Windows เดิมโดยไม่มีอะไรถูกแก้ สาเหตุอยู่ฝั่งแพลตฟอร์มและยังไม่ได้ระบุ
-agent ตั้งแต่ 0.5.23 ลองบูตเข้า WinPE ซ้ำเองสูงสุด 3 ครั้งก่อนยกเลิกงาน ยังไม่ได้ทดสอบกับเครื่อง PC จริง
+**KubeVirt virtual machines return to the old Windows instead of booting WinPE.** Seen on test VMs
+on 26 Nov 2026: at the moment the VM starts WinPE, the platform recreates the whole VM (the TPM is
+cleared, the clock and the Secure Boot variables are reset), so it boots the existing Windows with
+nothing changed. The cause is on the platform side and has not been identified. Since agent 0.5.23
+the agent retries the boot into WinPE by itself, three attempts in total, before giving the job up.
+This has not been tested on physical PCs yet.

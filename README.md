@@ -1,10 +1,10 @@
 <div align="center">
 
+**English** · [ไทย](README.th.md)
+
 # SWIM — Staged Windows Image Manager
 
-**ล้างเครื่องและติดตั้ง Windows ทั้งห้องคอมพิวเตอร์ผ่านเครือข่าย ไม่ต้องใช้ PXE หรือ USB**
-
-*Reimage a whole Windows computer lab over the network — no PXE, no USB sticks.*
+**Reimage a whole Windows computer lab over the network. No PXE, no USB sticks.**
 
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL%20v3-blue.svg)](LICENSE)
 ![Go 1.24](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go&logoColor=white)
@@ -12,82 +12,92 @@
 ![Clients: Windows 11](https://img.shields.io/badge/clients-Windows%2011-0078D4)
 ![Docker Compose](https://img.shields.io/badge/deploy-Docker%20Compose-2496ED?logo=docker&logoColor=white)
 
-[ติดตั้ง](#ติดตั้ง) · [ภาพหน้าจอ](#ภาพหน้าจอ) · [การออกแบบระบบ](#การออกแบบระบบ) · [คู่มือติดตั้ง](docs/INSTALL.md) · [คู่มือดูแลระบบ](docs/OPERATIONS.md)
+[Quick start](#quick-start) · [Screenshots](#screenshots) · [Architecture](#architecture) · [Installation guide](docs/INSTALL.md) · [Operations guide](docs/OPERATIONS.md)
 
 </div>
 
-SWIM สร้าง image ของ Windows จากเครื่องต้นแบบบน server แล้วสั่งล้างเครื่องและติดตั้งให้เครื่องลูก
-ทีละเครื่อง ทีละห้อง หรือตามตารางเวลา เครื่องลูกดาวน์โหลด image เอง ตรวจความถูกต้อง
-บูตเข้า WinPE ลง Windows แล้วกลับมาออนไลน์เองโดยไม่ต้องมีคนไปที่เครื่อง
+SWIM builds a Windows image from a golden master VM on the server and installs it on client
+machines one at a time, a room at a time, or on a schedule. Each client downloads the image
+itself, verifies it, boots into WinPE, installs Windows and comes back online without anyone
+walking to the machine.
 
-![หน้าแรกของ SWIM แสดงผังระบบและสถานะการติดตั้ง](docs/images/home.png)
+![SWIM home page with the system map and a Windows installation in progress](docs/images/home.png)
 
-## สารบัญ
+## Contents
 
-- [ทำอะไรได้](#ทำอะไรได้)
-- [ภาพหน้าจอ](#ภาพหน้าจอ)
-- [การออกแบบระบบ](#การออกแบบระบบ)
-- [ติดตั้ง](#ติดตั้ง)
-- [โครงสร้างของ repository](#โครงสร้างของ-repository)
-- [สิ่งที่ไม่อยู่ใน repository นี้](#สิ่งที่ไม่อยู่ใน-repository-นี้)
-- [เอกสาร](#เอกสาร)
-- [สัญญาอนุญาต](#สัญญาอนุญาต)
+- [Features](#features)
+- [Screenshots](#screenshots)
+- [Architecture](#architecture)
+  - [Components](#components)
+  - [Image pipeline](#image-pipeline)
+  - [Reimage flow](#reimage-flow)
+  - [Trust and security model](#trust-and-security-model)
+- [Quick start](#quick-start)
+- [Repository layout](#repository-layout)
+- [What is not in this repository](#what-is-not-in-this-repository)
+- [Documentation](#documentation)
+- [License](#license)
 
-## ทำอะไรได้
+## Features
 
-- **สร้าง image** จากเครื่องต้นแบบ (Golden Master) ที่รันบน server หรือนำเข้าจาก ISO ของ Windows โดยตรง
-  ระบบทำ sysprep ตรวจ image 6 ข้อ และรออนุมัติก่อนใช้งาน
-- **ล้างเครื่องและติดตั้ง Windows** ผ่านเครือข่าย เครื่องลูกดาวน์โหลด image เอง ตรวจ SHA-256
-  บูตเข้า WinPE ลง Windows แล้วกลับมาออนไลน์เอง
-- **สั่งทีละหลายเครื่อง** ทั้งห้อง หรือตั้งเวลาล่วงหน้าในปฏิทิน และเก็บ image ไว้ในเครื่องล่วงหน้าได้
-- **ดูแลเครื่อง** ด้วยเครื่องมือสำเร็จรูป 26 ตัว (ปิดเครื่อง, บัญชีผู้ใช้, โปรแกรม, Service, Windows Update, เครือข่าย, ดิสก์)
-  Remote Desktop ในเบราว์เซอร์ Wake-on-LAN และนโยบายล็อกการติดตั้งโปรแกรม
-- **ตรวจสอบย้อนหลังได้** ทุกการกระทำอยู่ในประวัติการใช้งานที่แก้ไขไม่ได้ เก็บ 90 วัน
-- **ความปลอดภัย** เข้าระบบด้วยรหัสผ่านและแอปยืนยันตัวตน (TOTP) ทุกคำสั่งถึงเครื่องลูกถูกเซ็นด้วย Ed25519
-- หน้าเว็บมีภาษาไทยและอังกฤษ ธีมมืดและสว่าง
+- **Build images** from a golden master VM that runs on the server, or import an edition straight
+  from a Windows ISO. SWIM runs sysprep, performs six offline checks and holds the image for
+  approval before it can be installed.
+- **Reimage over the network.** The client downloads the image, verifies its SHA-256, boots into
+  WinPE, installs Windows and re-enrolls on its own.
+- **Deploy at scale.** Select many machines or a whole room, schedule jobs on a calendar, and
+  pre-stage images on clients ahead of time.
+- **Manage machines** with 26 built-in tools (power, local users, programs, services, Windows
+  Update, network, disk), in-browser Remote Desktop, Wake-on-LAN and an install-lock policy.
+- **Audit everything.** Every action lands in a tamper-evident activity log, kept for 90 days.
+- **Secure by design.** Sign-in uses a password plus an authenticator app (TOTP), and every command
+  sent to a client is signed with Ed25519.
+- **Bilingual console** in English and Thai, with dark and light themes.
 
-## ภาพหน้าจอ
+## Screenshots
 
-ภาพทั้งหมดถ่ายจากโปรแกรมจริง ชื่อเครื่อง ที่อยู่ IP และชื่อผู้ใช้ถูกแทนด้วยค่าตัวอย่าง
+All screenshots are taken from the running application. Machine names, IP addresses and user
+names were replaced with sample values.
 
 | | |
 |---|---|
-| **เข้าสู่ระบบ** รหัสผ่านและรหัสจากแอปยืนยันตัวตน | **แผนผังเครื่อง** แยกตามห้อง ลากเครื่องย้ายห้องได้ |
-| ![หน้าเข้าสู่ระบบ](docs/images/login.png) | ![แผนผังเครื่องแยกตามห้อง](docs/images/hosts-map.png) |
-| **รายการเครื่อง** สถานะออนไลน์และ Windows ที่ติดตั้งอยู่ | **Images** ขั้นตอนสร้าง image จากเครื่องต้นแบบ |
-| ![ตารางเครื่อง](docs/images/hosts-table.png) | ![หน้า Images](docs/images/images.png) |
-| **หน้าเครื่อง** นโยบายเครื่องและ image ที่เก็บไว้ | **เครื่องมือ** สคริปต์ถูกสร้างและตรวจบน server |
-| ![แท็บ Windows ของเครื่อง](docs/images/host-windows.png) | ![เครื่องมือสำเร็จรูป](docs/images/host-tools.png) |
-| **ตารางงาน** ตั้งเวลาล้างเครื่องล่วงหน้า | **ประวัติการใช้งาน** ใครทำอะไร กับเครื่องไหน เมื่อไหร่ |
-| ![ปฏิทินตารางงาน](docs/images/schedule.png) | ![ประวัติการใช้งาน](docs/images/logs.png) |
+| **Sign-in** with password and authenticator code | **Machine map** grouped by room, drag a machine to move it |
+| ![Sign-in page](docs/images/login.png) | ![Machine map grouped by room](docs/images/hosts-map.png) |
+| **Machine list** with online status and installed Windows | **Images** and the golden master capture steps |
+| ![Machine table](docs/images/hosts-table.png) | ![Images page](docs/images/images.png) |
+| **Machine page** with install policy and pre-staged image | **Tools** whose scripts are built and checked on the server |
+| ![Windows tab of a machine](docs/images/host-windows.png) | ![Built-in tools](docs/images/host-tools.png) |
+| **Schedule** reimage jobs ahead of time | **Activity log** of who did what, where and when |
+| ![Schedule calendar](docs/images/schedule.png) | ![Activity log](docs/images/logs.png) |
 
-ธีมสว่าง:
+Light theme:
 
-![หน้าแรกในธีมสว่าง](docs/images/home-light.png)
+![Home page in the light theme](docs/images/home-light.png)
 
-## การออกแบบระบบ
+## Architecture
 
-### ภาพรวมของส่วนประกอบ
+### Components
 
-Server เครื่องเดียวรันทุกอย่าง ส่วนควบคุมอยู่ใน Docker Compose และใช้ KVM/libvirt บนเครื่องเดียวกันสำหรับเครื่องต้นแบบ
-เปิดสู่เครือข่ายเฉพาะพอร์ต 443 (และ 80 ที่ส่งต่อไป 443) บริการภายในไม่เปิดรับจากภายนอก
+One server runs everything. The control plane lives in Docker Compose, and KVM/libvirt on the same
+host runs the golden master VM. Only port 443 is exposed to the network (port 80 redirects to it);
+internal services are not reachable from outside.
 
 ```mermaid
 flowchart LR
-    admin["ผู้ดูแล<br/>(เบราว์เซอร์)"]
+    admin["Administrator<br/>(browser)"]
 
     subgraph server["SWIM Server · Ubuntu 24.04"]
-        nginx["nginx<br/>TLS, security headers,<br/>จำกัดความถี่การเข้าระบบ"]
-        backend["backend (Go)<br/>REST API, เซ็นคำสั่ง,<br/>ตารางงาน, audit log"]
+        nginx["nginx<br/>TLS, security headers,<br/>sign-in rate limiting"]
+        backend["backend (Go)<br/>REST API, command signing,<br/>scheduler, audit log"]
         pg[("PostgreSQL")]
-        builder["builder<br/>capture image<br/>(privileged)"]
-        guac["Guacamole + guacd<br/>หน้าจอ VM และ RDP"]
+        builder["builder<br/>image capture<br/>(privileged)"]
+        guac["Guacamole + guacd<br/>VM console and RDP"]
         waker["waker<br/>Wake-on-LAN"]
-        storage[("/srv/swim/storage<br/>image, WinPE, agent")]
-        gm["เครื่องต้นแบบ<br/>(KVM/libvirt VM)"]
+        storage[("/srv/swim/storage<br/>images, WinPE, agent")]
+        gm["Golden master<br/>(KVM/libvirt VM)"]
     end
 
-    subgraph lab["ห้องคอมพิวเตอร์"]
+    subgraph lab["Computer lab"]
         agent["SWIM Agent<br/>(Windows service)"]
         pe["SWIM WinPE<br/>(swim-pe)"]
     end
@@ -95,131 +105,134 @@ flowchart LR
     admin -- "HTTPS 443" --> nginx
     nginx --> backend
     nginx --> guac
-    nginx -. "ไฟล์ขนาดใหญ่<br/>(X-Accel-Redirect)" .-> storage
+    nginx -. "large files<br/>(X-Accel-Redirect)" .-> storage
     backend --> pg
-    backend -- "งาน capture" --> builder
+    backend -- "capture tasks" --> builder
     backend -- "Unix socket" --> waker
     builder --> gm
     builder --> storage
     guac -- "VNC" --> gm
     guac -- "RDP" --> agent
-    agent -- "HTTPS 443, long-poll<br/>ตรึงใบรับรองของ server" --> nginx
-    pe -- "HTTPS 443<br/>token ของงาน" --> nginx
+    agent -- "HTTPS 443, long-poll<br/>pinned server certificate" --> nginx
+    pe -- "HTTPS 443<br/>per-job token" --> nginx
     waker -. "magic packet" .-> agent
 ```
 
-| บริการ | หน้าที่ | เครือข่าย |
+| Service | Role | Network |
 |---|---|---|
-| `nginx` | จุดเข้าเดียวของระบบ เสิร์ฟหน้าเว็บ ส่งต่อ API และเสิร์ฟ image ที่ backend อนุญาตแล้ว | 80, 443 |
-| `backend` | API ทั้งหมด เซ็นคำสั่ง จัดตารางงาน เขียนประวัติการใช้งาน | `127.0.0.1:8090` |
-| `postgres` | ฐานข้อมูล แอปใช้ role ที่แก้หรือลบประวัติการใช้งานไม่ได้ | เครือข่ายภายใน Docker |
-| `builder` | ทำงาน capture image และ snapshot ของเครื่องต้นแบบ | ไม่มีพอร์ต |
-| `guacamole`, `guacd` | แสดงหน้าจอเครื่องต้นแบบ (VNC) และ Remote Desktop ของเครื่องลูกในเบราว์เซอร์ | `:8080` (firewall ปิดจากภายนอก), `127.0.0.1:4822` |
-| `waker` | ส่ง Wake-on-LAN จากเครือข่ายของ host | Unix socket |
+| `nginx` | Single entry point. Serves the console, proxies the API and serves images the backend has authorised | 80, 443 |
+| `backend` | The whole API: signs commands, runs schedules, writes the activity log | `127.0.0.1:8090` |
+| `postgres` | Database. The application role cannot alter or delete activity log rows | Docker internal network |
+| `builder` | Captures images and manages golden master snapshots | no ports |
+| `guacamole`, `guacd` | Golden master console (VNC) and client Remote Desktop in the browser | `:8080` (blocked by the firewall), `127.0.0.1:4822` |
+| `waker` | Sends Wake-on-LAN packets from the host network | Unix socket |
 
-### เส้นทางของ image
+### Image pipeline
 
-Image ทุกตัวต้องผ่านการอนุมัติก่อนติดตั้งได้ การ capture ทำบนสำเนาชั่วคราว เครื่องต้นแบบจึงไม่ถูกแก้
+No image can be installed before an administrator approves it. Capture works on a temporary copy,
+so the golden master itself is never modified.
 
 ```mermaid
 flowchart LR
-    iso["ISO ของ Windows<br/>(/srv/swim/vms/iso)"]
-    gm["เครื่องต้นแบบ<br/>ติดตั้งโปรแกรมและอัปเดต"]
-    overlay["สำเนาชั่วคราว<br/>(qcow2 overlay)"]
+    iso["Windows ISO<br/>(/srv/swim/vms/iso)"]
+    gm["Golden master<br/>install programs and updates"]
+    overlay["Temporary copy<br/>(qcow2 overlay)"]
     sysprep["sysprep<br/>/generalize /oobe"]
-    unwof["คลายไฟล์<br/>CompactOS"]
-    checks{"ตรวจ 6 ข้อ<br/>S-01 ถึง S-06"}
-    wim["capture เป็น WIM<br/>+ SHA-256"]
-    pending["รออนุมัติ"]
-    published["ใช้งานอยู่"]
-    prestage["เก็บไว้ในเครื่องลูก<br/>ล่วงหน้า"]
-    deploy["ล้างเครื่อง<br/>และติดตั้ง"]
-    fail["งานล้มเหลว<br/>พร้อม log"]
+    unwof["Expand<br/>CompactOS files"]
+    checks{"6 offline checks<br/>S-01 to S-06"}
+    wim["Capture to WIM<br/>+ SHA-256"]
+    pending["Awaiting approval"]
+    published["Published"]
+    prestage["Pre-staged<br/>on clients"]
+    deploy["Reimage<br/>and install"]
+    fail["Task fails<br/>with a log"]
 
     iso --> gm --> overlay --> sysprep --> unwof --> checks
-    iso -- "นำเข้าตรงจาก ISO" --> wim
-    checks -- "ผ่าน" --> wim --> pending
-    checks -- "S-01 หรือ S-02 ไม่ผ่าน" --> fail
-    pending -- "ผู้ดูแลอนุมัติ" --> published
+    iso -- "import directly from ISO" --> wim
+    checks -- "pass" --> wim --> pending
+    checks -- "S-01 or S-02 fails" --> fail
+    pending -- "administrator approves" --> published
     published --> prestage --> deploy
     published --> deploy
 ```
 
-### ขั้นตอนล้างเครื่องและติดตั้ง
+### Reimage flow
 
-จนถึงจุดที่ WinPE เริ่มแบ่งดิสก์ ทุกอย่างย้อนกลับได้ ถ้าเกิดปัญหาก่อนหน้านั้นเครื่องจะกลับเข้า Windows เดิมโดยไม่มีอะไรถูกแก้
+Everything is reversible until WinPE starts to partition the disk. If something goes wrong before
+that point, the machine returns to its existing Windows with nothing changed.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor A as ผู้ดูแล
+    actor A as Administrator
     participant S as SWIM Server
-    participant G as Agent (Windows เดิม)
+    participant G as Agent (old Windows)
     participant P as SWIM WinPE
-    participant N as Windows ใหม่
+    participant N as New Windows
 
-    A->>S: สั่งล้างเครื่อง (image, ดิสก์, รหัสผู้ดูแลเครื่อง)
-    S->>S: เซ็นคำสั่ง และเข้ารหัสข้อมูลลับถึงเครื่องนั้น
-    G->>S: รับคำสั่ง (long-poll)
-    G->>G: ตรวจลายเซ็น อายุคำสั่ง และกันการส่งซ้ำ
-    G->>G: สร้างพาร์ทิชันพักไฟล์ 20 GB
-    G->>S: ดาวน์โหลด image และ WinPE แล้วตรวจ SHA-256
-    G->>G: ใส่ driver ของเครื่อง ตั้งบูตครั้งเดียวเข้า WinPE
-    G-->>P: รีสตาร์ต
-    Note over G,P: ถ้ากลับเข้า Windows เดิม agent ลองซ้ำเองสูงสุด 3 ครั้ง
-    P->>S: รายงานความคืบหน้า (token ของงาน)
-    Note over P: จุดที่ย้อนกลับไม่ได้ คือเริ่มแบ่งดิสก์
-    P->>P: แบ่งดิสก์ ลง image ใส่ driver, agent และไฟล์คำตอบ
-    P-->>N: รีสตาร์ต
-    N->>S: ลงทะเบียนกลับด้วยตั๋วใช้ครั้งเดียว
-    S->>A: งานเสร็จ เครื่องออนไลน์
+    A->>S: Start reimage (image, disk layout, local admin password)
+    S->>S: Sign the command and seal the secrets to that machine
+    G->>S: Receive the command (long-poll)
+    G->>G: Verify signature, validity window and replay protection
+    G->>G: Create a 20 GB staging partition
+    G->>S: Download image and WinPE, verify SHA-256
+    G->>G: Add this machine's drivers, set a one-time boot into WinPE
+    G-->>P: Restart
+    Note over G,P: If the old Windows comes back, the agent retries by itself (3 attempts in total)
+    P->>S: Report progress (per-job token)
+    Note over P: Point of no return: disk partitioning starts
+    P->>P: Partition, apply image, inject drivers, agent and answer file
+    P-->>N: Restart
+    N->>S: Re-enroll with a one-time ticket
+    S->>A: Job completed, machine online
 ```
 
-สถานะของงานติดตั้ง:
+Job states:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> staging: สั่งล้างเครื่อง
-    staging --> handoff: ดาวน์โหลดและเตรียมเสร็จ
-    staging --> cancelled: ผู้ดูแลยกเลิก
-    handoff --> pe: บูตเข้า WinPE
-    handoff --> handoff: กลับเข้า Windows เดิม ลองซ้ำไม่เกิน 3 ครั้ง
-    handoff --> aborted: ลองครบแล้วไม่สำเร็จ ไม่มีอะไรถูกแก้
-    pe --> completed: Windows ใหม่ลงทะเบียนกลับ
-    pe --> failed: ผิดพลาดใน WinPE
-    failed --> retry: ผู้ดูแลกดลองใหม่
-    retry --> pe: WinPE ดาวน์โหลด image ใหม่
+    [*] --> staging: reimage requested
+    staging --> handoff: download and preparation done
+    staging --> cancelled: cancelled by an administrator
+    handoff --> pe: booted into WinPE
+    handoff --> handoff: old Windows came back, automatic retry (max 3 attempts)
+    handoff --> aborted: all attempts missed, nothing was changed
+    pe --> completed: new Windows re-enrolled
+    pe --> failed: error inside WinPE
+    failed --> retry: administrator presses retry
+    retry --> pe: WinPE downloads the image again
     completed --> [*]
     aborted --> [*]
     cancelled --> [*]
 ```
 
-### ความเชื่อถือและความปลอดภัย
+### Trust and security model
 
-เครื่องลูกรันคำสั่งด้วยสิทธิ์ SYSTEM ระบบจึงมีการป้องกันหลายชั้นระหว่างผู้ดูแล server และเครื่องลูก
+Clients run commands as SYSTEM, so there are several independent layers between the administrator,
+the server and the clients.
 
 ```mermaid
 flowchart TB
-    subgraph adminside["ฝั่งผู้ดูแล"]
-        login["รหัสผ่าน (Argon2id)<br/>+ TOTP + รหัสสำรอง"]
-        session["Session cookie<br/>HttpOnly, Secure, SameSite=Strict<br/>+ header กัน CSRF"]
+    subgraph adminside["Administrator"]
+        login["Password (Argon2id)<br/>+ TOTP + recovery codes"]
+        session["Session cookie<br/>HttpOnly, Secure, SameSite=Strict<br/>+ CSRF header"]
         login --> session
     end
 
-    subgraph serverside["ฝั่ง server"]
-        tools["คลังเครื่องมือ<br/>สร้างสคริปต์และตรวจค่าบน server<br/>ไม่รับข้อความสคริปต์จากภายนอก"]
-        seal["เข้ารหัสข้อมูลลับ<br/>ถึงกุญแจ X25519 ของเครื่องนั้น"]
-        sign["เซ็นคำสั่งด้วย Ed25519<br/>ระบุเครื่อง เวลาเริ่ม และเวลาหมดอายุ"]
-        audit["ประวัติการใช้งาน<br/>ต่อกันเป็นห่วงโซ่ hash<br/>role ของแอปแก้หรือลบไม่ได้"]
+    subgraph serverside["Server"]
+        tools["Tool registry<br/>scripts are built and validated on the server<br/>no script text is accepted from outside"]
+        seal["Secrets sealed<br/>to the machine's X25519 key"]
+        sign["Command signed with Ed25519<br/>bound to one machine, with a validity window"]
+        audit["Activity log<br/>hash-chained<br/>application role cannot alter or delete it"]
         tools --> sign --> audit
         seal --> sign
     end
 
-    subgraph agentside["ฝั่งเครื่องลูก"]
-        pin["ตรึงใบรับรองของ server<br/>(SHA-256)"]
-        verify["ตรวจลายเซ็น อายุคำสั่ง<br/>และรหัสเครื่อง"]
-        replay["คำสั่งหนึ่งรันได้ครั้งเดียว"]
-        hash["ตรวจ SHA-256 ของ image,<br/>WinPE และ agent รุ่นใหม่"]
+    subgraph agentside["Client"]
+        pin["Server certificate pinned<br/>(SHA-256)"]
+        verify["Verify signature, validity window<br/>and machine identity"]
+        replay["Each command runs at most once"]
+        hash["Verify SHA-256 of the image,<br/>WinPE and agent updates"]
         pin --> verify --> replay --> hash
     end
 
@@ -227,20 +240,21 @@ flowchart TB
     sign -- "HTTPS 443" --> pin
 ```
 
-| ชั้น | การป้องกัน |
+| Layer | Protection |
 |---|---|
-| เข้าระบบ | รหัสผ่านและ TOTP, ผิด 5 ครั้งบัญชีถูกพัก 15 นาที, ผิด 20 ครั้งจาก IP เดียวถูกพัก 15 นาที |
-| หน้าเว็บ | Content-Security-Policy ห้ามสคริปต์แปลกปลอม, HSTS, ห้ามฝังใน iframe |
-| คำสั่ง | เซ็นทุกคำสั่ง ระบุเครื่องปลายทางและเวลาหมดอายุ, agent ไม่รันคำสั่งซ้ำ |
-| ข้อมูลลับ | รหัสผู้ดูแลเครื่องถูกเข้ารหัสถึงเครื่องปลายทาง งานที่ตั้งเวลาไว้เก็บรหัสแบบเข้ารหัส (AES-256-GCM) |
-| ไฟล์ | image, WinPE และ agent ตรวจ SHA-256 ก่อนใช้ทุกครั้ง |
-| ประวัติ | แก้หรือลบตรง ๆ ไม่ได้ ตรวจความครบถ้วนของห่วงโซ่ได้จากหน้าเว็บ |
+| Sign-in | Password plus TOTP. 5 failures suspend the account for 15 minutes, 20 failures from one IP suspend that IP for 15 minutes |
+| Console | Content-Security-Policy blocks injected scripts, HSTS, no framing by other sites |
+| Commands | Every command is signed, bound to one machine and expires. The agent never runs a command twice |
+| Secrets | The local admin password is sealed to the target machine. Scheduled jobs store it encrypted (AES-256-GCM) |
+| Files | Images, WinPE and agent updates are verified by SHA-256 before use |
+| Audit | The log cannot be edited or deleted directly, and the console can verify the hash chain |
 
-รายละเอียดเพิ่มเติมอยู่ใน [docs/spec/08-security.md](docs/spec/08-security.md) และ [docs/OPERATIONS.md](docs/OPERATIONS.md)
+More detail: [docs/spec/08-security.md](docs/spec/08-security.md) (Thai) and [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
-## ติดตั้ง
+## Quick start
 
-ต้องมี Ubuntu 24.04 LTS ที่รองรับ virtualization, RAM 16 GB ขึ้นไป, ดิสก์ว่าง 100 GB ขึ้นไป และ IP คงที่
+Requirements: Ubuntu 24.04 LTS with hardware virtualisation, 16 GB RAM or more, 100 GB of free disk
+and a static IP address.
 
 ```bash
 sudo mkdir -p /opt/swim && sudo chown "$USER" /opt/swim
@@ -249,53 +263,88 @@ cd /opt/swim
 ./install.sh
 ```
 
-สคริปต์ติดตั้งแพ็กเกจ สร้างรหัสลับชุดใหม่ สร้างใบรับรอง TLS ตั้ง firewall build และสตาร์ตระบบ
-แล้วบอกวิธีเข้าใช้งานครั้งแรก ขั้นตอนทั้งหมดรวมถึงการสร้าง image แรกอยู่ใน [docs/INSTALL.md](docs/INSTALL.md)
+The script installs the host packages, generates fresh secrets and a TLS certificate, configures
+the firewall, builds and starts the stack, and prints how to sign in for the first time. The full
+walkthrough, including building the first image, is in [docs/INSTALL.md](docs/INSTALL.md).
 
-## โครงสร้างของ repository
+## Repository layout
 
-| ส่วน | โฟลเดอร์ | เนื้อหา |
+```text
+.
+├── backend/                  Control plane (Go)
+│   ├── cmd/server/           Entry point: API server, builder worker, waker, CLI
+│   ├── internal/api/         REST API: auth, hosts, commands, deploy, schedules, tools, audit
+│   ├── internal/builder/     Image capture: reseal (sysprep), offline checks, ISO import
+│   ├── internal/audit/       Hash-chained activity log
+│   ├── internal/signing/     Ed25519 command-signing key
+│   ├── internal/vm/          libvirt wrapper for the golden master VM
+│   ├── internal/wol/         Wake-on-LAN sender
+│   ├── internal/msi/         Per-site agent installer (MSI) builder
+│   ├── migrations/           PostgreSQL schema, applied automatically at start
+│   └── tools/ntfs-unwof/     Helper that expands CompactOS (WOF) files before capture
+├── agent/                    Windows agent (Go)
+│   ├── cmd/swim-agent/       Service entry point
+│   ├── internal/agent/       Enrollment, command loop, reimage, pre-staging, policy, remote session
+│   └── install/              install.ps1 and Windows trust policy script
+├── pe/cmd/swim-pe/           WinPE worker: partition, apply image, inject drivers and agent
+├── pkg/
+│   ├── manifest/             Signed command and job manifest formats shared by server and agent
+│   └── wof/                  CompactOS (WOF) decompression
+├── frontend/                 Admin console: plain HTML, CSS and JavaScript, no build step
+├── builder-infra/
+│   ├── docker-compose.yml    postgres, backend, builder, waker, nginx, guacd, guacamole
+│   ├── nginx/                TLS, security headers, rate limits
+│   ├── postgres/             Database role bootstrap
+│   └── scripts/              Host setup, agent build, WinPE build, golden master, smoke test
+├── docs/                     Installation and operations guides, specification, screenshots
+├── install.sh                One-command installation for a fresh Ubuntu 24.04 server
+├── LICENSE                   GNU AGPL v3
+└── NOTICE                    Copyright and third-party notices
+```
+
+| Component | Language | Runs on | Purpose |
+|---|---|---|---|
+| `backend` | Go | Server (Docker) | API, signing, scheduling, audit log, image builder |
+| `frontend` | HTML/CSS/JS | Browser | Administrator console |
+| `agent` | Go | Client Windows (service) | Executes signed commands, stages and hands off reimage jobs |
+| `pe` | Go | Client WinPE | Partitions the disk and installs the image |
+| `pkg` | Go | Shared | Wire formats and CompactOS handling |
+
+## What is not in this repository
+
+Every secret is generated on the server at install time and never stored in Git.
+
+| Not included | Location on the server | Created by |
 |---|---|---|
-| Server (control plane) | `backend/` | REST API, ฐานข้อมูล, เซ็นคำสั่ง, ตารางงาน, ประวัติการใช้งาน (Go) |
-| หน้าเว็บ | `frontend/` | Console ของผู้ดูแล (HTML/CSS/JS ล้วน ไม่มีขั้น build) |
-| Agent | `agent/` | บริการบน Windows ของเครื่องลูก รับคำสั่งที่เซ็นแล้วจาก server (Go) |
-| WinPE worker | `pe/` | โปรแกรมที่รันใน WinPE เพื่อแบ่งดิสก์และลง image (Go) |
-| ของใช้ร่วม | `pkg/` | รูปแบบคำสั่งและ manifest, ตัวคลายไฟล์ CompactOS |
-| โครงสร้างพื้นฐาน | `builder-infra/` | Docker Compose, nginx, สคริปต์ติดตั้งและ build |
-| เอกสาร | `docs/` | สเปค, คู่มือติดตั้ง, คู่มือดูแลระบบ, ภาพหน้าจอ |
+| Database passwords, admin tokens, Guacamole secret | `builder-infra/.env` | `scripts/setup-host.sh` |
+| Command-signing key (Ed25519) and schedule encryption key | `/srv/swim/keys/` | backend, on first start |
+| TLS certificate and private key | `/srv/swim/certs/` | `scripts/setup-host.sh` |
+| Database, images, Windows ISOs, built agent binaries | `/srv/swim/` and a Docker volume | normal use |
 
-## สิ่งที่ไม่อยู่ใน repository นี้
+An example settings file is at [builder-infra/.env.example](builder-infra/.env.example).
+You must supply your own Windows ISO under your organisation's licence.
 
-รหัสลับทุกตัวถูกสร้างใหม่บน server ตอนติดตั้ง และไม่ถูกเก็บใน Git
+## Documentation
 
-| สิ่งที่ไม่มี | อยู่ที่ไหนบน server | สร้างโดย |
-|---|---|---|
-| รหัสผ่านฐานข้อมูล, admin token, รหัสของ Guacamole | `builder-infra/.env` | `scripts/setup-host.sh` |
-| กุญแจเซ็นคำสั่ง (Ed25519) และกุญแจเข้ารหัสตารางงาน | `/srv/swim/keys/` | backend ตอนสตาร์ตครั้งแรก |
-| ใบรับรอง TLS และ private key | `/srv/swim/certs/` | `scripts/setup-host.sh` |
-| ฐานข้อมูล, image, ISO ของ Windows, ไฟล์ agent ที่ build แล้ว | `/srv/swim/` และ Docker volume | การใช้งาน |
+| Document | Language |
+|---|---|
+| [Installation guide](docs/INSTALL.md): from an empty server to the first Windows install | English · [ไทย](docs/INSTALL.th.md) |
+| [Operations guide](docs/OPERATIONS.md): updates, agent releases, backup, security, known issues | English · [ไทย](docs/OPERATIONS.th.md) |
+| [Specification](docs/spec/README.md): 12 chapters covering architecture, agent, manifest, security, data model and API | Thai |
+| [Windows trust policy](docs/deploy/windows-trust-policy.md): Group Policy settings so clients trust the server | Thai |
+| [Builder internals](builder-infra/README.md): golden master and image capture details | Thai |
 
-ตัวอย่างไฟล์ตั้งค่าอยู่ที่ [builder-infra/.env.example](builder-infra/.env.example)
-ISO ของ Windows ต้องจัดหาเองตามสิทธิ์การใช้งานของหน่วยงาน
-
-## เอกสาร
-
-- [docs/INSTALL.md](docs/INSTALL.md) ติดตั้งตั้งแต่ server เปล่าจนสั่งติดตั้ง Windows เครื่องแรก
-- [docs/OPERATIONS.md](docs/OPERATIONS.md) อัปเดตระบบ, ออก agent รุ่นใหม่, สำรองข้อมูล, ความปลอดภัย, ปัญหาที่รู้อยู่
-- [docs/spec/](docs/spec/README.md) สเปคของระบบ 12 บท
-- [docs/deploy/windows-trust-policy.md](docs/deploy/windows-trust-policy.md) ตั้งค่า GPO ให้เครื่องลูกเชื่อถือ server
-- [builder-infra/README.md](builder-infra/README.md) รายละเอียดของ Builder และการ capture image
-
-## สัญญาอนุญาต
+## License
 
 Copyright (C) 2026 Thanakorn Kriangudom
 
-ออกแบบและพัฒนาโดย Thanakorn Kriangudom โดยมี Claude (Anthropic) เป็นผู้ช่วยเขียนโค้ด ตรวจความปลอดภัย และจัดทำเอกสาร
+Designed and developed by Thanakorn Kriangudom, with Claude (Anthropic) assisting with code,
+security review and documentation.
 
-เผยแพร่ภายใต้ [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-or-later) ดูประกาศลิขสิทธิ์ใน [NOTICE](NOTICE)
+Released under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-or-later). See
+[NOTICE](NOTICE) for the copyright notice. In short: you may use, modify and redistribute SWIM, but
+if you run a modified version for others over a network, you must offer them the source of that
+version under the same licence. The `LICENSE` file is the binding text.
 
-สรุปสั้น ๆ: ใช้ แก้ไข และเผยแพร่ต่อได้ แต่ถ้าแก้ไขแล้วเปิดให้ผู้อื่นใช้งานผ่านเครือข่าย
-ต้องเปิดซอร์สโค้ดฉบับที่แก้ไขให้ผู้ใช้เหล่านั้นภายใต้สัญญาเดียวกัน ข้อความในไฟล์ `LICENSE` คือเงื่อนไขที่มีผลจริง
-
-ฟอนต์ IBM Plex Sans Thai และ IBM Plex Mono ใน `frontend/fonts/` เป็นของ IBM Corp.
-ใช้ภายใต้ SIL Open Font License 1.1 และ Windows เป็นผลิตภัณฑ์ของ Microsoft ที่ต้องมีสิทธิ์การใช้งานของตัวเอง
+The IBM Plex Sans Thai and IBM Plex Mono typefaces in `frontend/fonts/` are Copyright IBM Corp. and
+used under the SIL Open Font License 1.1. Windows is a Microsoft product and requires its own licence.

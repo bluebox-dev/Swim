@@ -1,21 +1,23 @@
-# คู่มือติดตั้ง SWIM
+# SWIM installation guide
 
-จาก server เปล่าจนถึงสั่งติดตั้ง Windows ให้เครื่องลูกเครื่องแรก
+**English** · [ไทย](INSTALL.th.md)
 
-## 1. สิ่งที่ต้องเตรียม
+From an empty server to the first Windows installation on a client machine.
 
-| รายการ | ขั้นต่ำ | หมายเหตุ |
+## 1. Prerequisites
+
+| Item | Minimum | Notes |
 |---|---|---|
-| ระบบปฏิบัติการ | Ubuntu 24.04 LTS | ผู้ใช้ที่มีสิทธิ์ sudo (ไม่ใช่ root) |
-| CPU | รองรับ virtualization (VT-x/AMD-V) | ถ้าเป็น VM ต้องเปิด nested virtualization ไม่อย่างนั้น Builder ใช้ไม่ได้ |
-| RAM | 16 GB | เครื่องต้นแบบใช้ 8 GB ระหว่างเปิด |
-| ดิสก์ | 100 GB ว่าง | image หนึ่งตัวประมาณ 12 GB, เครื่องต้นแบบ 30 ถึง 80 GB |
-| เครือข่าย | IP คงที่ | เครื่องลูกต้องเข้าถึงพอร์ต 443 ของ server ได้ |
-| ISO ของ Windows 11 | 1 ไฟล์ | ใช้สร้างเครื่องต้นแบบและ WinPE |
+| Operating system | Ubuntu 24.04 LTS | A user with sudo rights (not root) |
+| CPU | Hardware virtualisation (VT-x / AMD-V) | On a VM, enable nested virtualisation or the Builder will not work |
+| RAM | 16 GB | The golden master uses 8 GB while it is running |
+| Disk | 100 GB free | One image is about 12 GB, a golden master 30 to 80 GB |
+| Network | Static IP address | Clients must reach port 443 of the server |
+| Windows 11 ISO | 1 file | Used for the golden master and for WinPE |
 
-พอร์ตที่เปิดสู่ภายนอกมีแค่ 22, 80 และ 443 (สคริปต์ตั้ง ufw ให้)
+Only ports 22, 80 and 443 are open to the network (the script configures ufw).
 
-## 2. ติดตั้ง server
+## 2. Install the server
 
 ```bash
 sudo mkdir -p /opt/swim && sudo chown "$USER" /opt/swim
@@ -24,101 +26,105 @@ cd /opt/swim
 ./install.sh
 ```
 
-`install.sh` ทำ 5 ขั้นและรันซ้ำได้โดยไม่ทับของเดิม:
+`install.sh` runs five steps and is safe to run again; it never overwrites what already exists.
 
-1. ติดตั้งแพ็กเกจ: Docker, KVM/libvirt, OVMF, swtpm, wimlib และเครื่องมือดิสก์
-2. `builder-infra/scripts/setup-host.sh`: สร้าง `/srv/swim`, ไฟล์ `builder-infra/.env` ที่มีรหัสสุ่มชุดใหม่,
-   ใบรับรอง TLS แบบ self-signed และกฎ firewall
-3. `docker compose up -d --build`: build backend (รัน `go vet` และ `go test` ในขั้น build) แล้วสตาร์ตทุกบริการ
-   ฐานข้อมูลถูกสร้างและ migrate เองตอน backend สตาร์ต
-4. `builder-infra/scripts/build-agent.sh`: build agent ของ Windows และวางไว้ให้เครื่องลูกดาวน์โหลด
-5. `builder-infra/scripts/build-winpe.sh`: build SWIM WinPE ถ้ามี ISO อยู่ใน `/srv/swim/vms/iso/` แล้ว
+1. Installs the host packages: Docker, KVM/libvirt, OVMF, swtpm, wimlib and disk tools.
+2. `builder-infra/scripts/setup-host.sh` creates `/srv/swim`, a `builder-infra/.env` file with fresh
+   random secrets, a self-signed TLS certificate and the firewall rules.
+3. `docker compose up -d --build` builds the backend (`go vet` and `go test` run during the build)
+   and starts every service. The database is created and migrated when the backend starts.
+4. `builder-infra/scripts/build-agent.sh` builds the Windows agent and publishes it for clients.
+5. `builder-infra/scripts/build-winpe.sh` builds SWIM WinPE if an ISO is already in `/srv/swim/vms/iso/`.
 
-ออกจากระบบแล้วเข้าใหม่หนึ่งครั้ง เพื่อให้ผู้ใช้ได้สิทธิ์กลุ่ม `docker` และ `libvirt`
+Log out and back in once so your user picks up the `docker` and `libvirt` groups.
 
-## 3. เข้าใช้งานครั้งแรก
+## 3. First sign-in
 
-1. เปิด `https://<IP ของ server>/` (เบราว์เซอร์จะเตือนเรื่องใบรับรอง เพราะเป็น self-signed)
-2. ตอนยังไม่มีบัญชี ให้เข้าด้วย admin token ดูได้จาก
+1. Open `https://<server IP>/`. The browser warns about the certificate because it is self-signed.
+2. While no account exists, sign in with an admin token:
 
    ```bash
    sudo grep ^SWIM_ADMIN_TOKENS /opt/swim/builder-infra/.env
    ```
 
-3. สร้างบัญชีผู้ดูแลคนแรกที่ ตั้งค่า → ผู้ดูแลระบบ → เพิ่มผู้ดูแล ระบบจะให้ลิงก์ตั้งค่าใช้ครั้งเดียว
-   เปิดลิงก์เพื่อตั้งรหัสผ่านและสแกน QR ด้วย Google Authenticator แล้วเก็บรหัสสำรอง 10 ชุดไว้
-4. จากนั้นเข้าระบบด้วยชื่อผู้ใช้ รหัสผ่าน และรหัส 6 หลักจากแอป
+3. Create the first administrator account under Settings → Admins → Add admin.
+   You get a one-time setup link. Open it, choose a password, scan the QR code with an
+   authenticator app such as Google Authenticator, and store the 10 recovery codes.
+4. From then on, sign in with user name, password and the 6-digit code from the app.
 
-สร้างบัญชีจาก command line ได้เช่นกัน:
+The same can be done from the command line:
 
 ```bash
 sudo docker exec swim-backend-1 swim-server user add <username>
 ```
 
-## 4. นำ ISO ของ Windows ขึ้น server
+## 4. Copy a Windows ISO to the server
 
-หน้าเว็บไม่มีการอัปโหลด ISO โดยตั้งใจ ให้คัดลอกผ่าน ssh:
+The console deliberately has no ISO upload. Copy the file over SSH:
 
 ```bash
 scp Windows11.iso <user>@<server>:/srv/swim/vms/iso/
 ```
 
-แล้ว build WinPE (ถ้าตอนติดตั้งยังไม่มี ISO):
+Then build WinPE, if no ISO was present during installation:
 
 ```bash
 cd /opt/swim/builder-infra
 ./scripts/build-winpe.sh /srv/swim/vms/iso/Windows11.iso
 ```
 
-## 5. สร้าง image แรก
+## 5. Build the first image
 
-มี 2 ทาง
+There are two ways.
 
-**ทาง A นำเข้าจาก ISO โดยตรง** หน้า Images → เลือก ISO → เลือกรุ่นของ Windows → นำเข้า → อนุมัติ
-ได้ Windows สะอาดตามแผ่น เหมาะกับการเริ่มต้นเร็ว
+**A. Import directly from the ISO.** Images → choose the ISO → choose the Windows edition →
+Import → Approve. This gives a clean Windows as shipped, and is the quickest start.
 
-**ทาง B สร้างจากเครื่องต้นแบบ (Golden Master)** เมื่อต้องการลงโปรแกรมและตั้งค่าไว้ใน image
+**B. Capture a golden master.** Use this when programs and settings should be part of the image.
 
 ```bash
 cd /opt/swim/builder-infra
 ISO=/srv/swim/vms/iso/Windows11.iso DISK_GB=80 ./scripts/create-golden-master.sh gm-win11
 ```
 
-1. หน้า Images → เปิดเครื่องต้นแบบ → เปิดหน้าจอ (Console) ในเบราว์เซอร์ แล้วติดตั้ง Windows โปรแกรม และอัปเดต
-2. ปิดเครื่องต้นแบบ (Shut down)
-3. กด Capture เลือกหัวข้อ image และตั้งชื่อเวอร์ชัน ระบบทำ sysprep ในสำเนาชั่วคราว ตรวจ image และ capture เอง
-   เครื่องต้นแบบไม่ถูกแก้
-4. เมื่อสถานะเป็น "รออนุมัติ" กดอนุมัติ image จึงพร้อมติดตั้ง
+1. Images → start the golden master → open its console in the browser, then install Windows,
+   programs and updates.
+2. Shut the golden master down.
+3. Press Capture, choose the image channel and a version name. SWIM runs sysprep in a temporary
+   copy, checks the result and captures it. The golden master is not modified.
+4. When the status is "Awaiting approval", approve it. The image is then ready to install.
 
-ห้ามลบเครื่องต้นแบบด้วย `virsh undefine --remove-all-storage` เพราะจะลบ ISO ใน `/srv/swim/vms/iso/` ไปด้วย
+Never remove a golden master with `virsh undefine --remove-all-storage`: it also deletes the ISOs
+in `/srv/swim/vms/iso/`.
 
-## 6. เพิ่มเครื่องลูก
+## 6. Add client machines
 
-หน้า เพิ่มเครื่อง ให้ 2 แบบ:
+The Add machine page offers two installers:
 
-- **ไฟล์ MSI** ดาวน์โหลดแล้วดับเบิลคลิกบนเครื่องลูก
-- **คำสั่ง PowerShell** วางใน PowerShell ที่เปิดแบบ Administrator
+- **MSI file.** Download it and double-click it on the client.
+- **PowerShell command.** Paste it into a PowerShell window opened as Administrator.
 
-ทั้งสองแบบมี token อายุสั้นและลายนิ้วมือใบรับรองของ server ฝังอยู่ agent จึงคุยกับ server ตัวนี้เท่านั้น
-เครื่องจะขึ้นในหน้า เครื่อง ภายในไม่กี่วินาที
+Both carry a short-lived enrollment token and the fingerprint of the server certificate, so the
+agent talks to this server only. The machine appears on the Machines page within seconds.
 
-สำหรับหลายเครื่องในโดเมน ดู [deploy/windows-trust-policy.md](deploy/windows-trust-policy.md)
+For many domain-joined machines see [deploy/windows-trust-policy.md](deploy/windows-trust-policy.md) (Thai).
 
-## 7. สั่งติดตั้ง Windows
+## 7. Install Windows on a client
 
-1. หน้าเครื่อง → แท็บ Windows → ล้างเครื่องและติดตั้ง
-2. เลือก image, รูปแบบดิสก์ และตั้งชื่อกับรหัสผ่านของผู้ดูแลเครื่อง (local administrator)
-3. ยืนยัน เครื่องจะดาวน์โหลด image ตรวจ SHA-256 บูตเข้า WinPE ลง Windows แล้วกลับมาออนไลน์เอง
+1. Open the machine → Windows tab → Reimage and install.
+2. Choose the image and the disk layout, and set the name and password of the local administrator.
+3. Confirm. The machine downloads the image, verifies its SHA-256, boots into WinPE, installs
+   Windows and comes back online by itself.
 
-สั่งหลายเครื่องพร้อมกันได้จากหน้า เครื่อง (เลือกหลายแถว) หรือตั้งเวลาในหน้า ตารางงาน
+To reimage several machines at once, select rows on the Machines page, or plan it on the Schedule page.
 
-## 8. ตรวจว่าติดตั้งถูกต้อง
+## 8. Verify the installation
 
 ```bash
 cd /opt/swim/builder-infra
-sudo docker compose ps                     # ทุกบริการต้อง Up
+sudo docker compose ps                     # every service must be Up
 curl -sk https://127.0.0.1/v1/health       # {"status":"ok"}
-sudo bash ./scripts/smoke-test.sh          # ทดสอบ end-to-end (สร้างข้อมูลทดสอบ ใช้กับ lab เท่านั้น)
+sudo bash ./scripts/smoke-test.sh          # end-to-end test (creates test records: lab servers only)
 ```
 
-ขั้นต่อไป: [OPERATIONS.md](OPERATIONS.md)
+Next: [OPERATIONS.md](OPERATIONS.md)

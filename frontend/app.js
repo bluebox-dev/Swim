@@ -1022,7 +1022,8 @@ function ccGraph(c) {
     <rect class="cc-card ${tone}" x="${x}" y="${y}" width="${NW}" height="${NH}" rx="10"/>${ccIco(icon, x + 11, y + 11, tone)}
     <text class="cc-name" x="${x + 60}" y="${y + 27}">${esc(trunc(name, 22))}</text><text class="cc-sub" x="${x + 60}" y="${y + 45}">${esc(trunc(sub, 28))}</text></a>`;
   const vis = t => t.replace(/[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E]/g, '').length;
-  const pill = (x, y, tone, a, b) => { const la = vis(a) * 6.4, w = la + vis(b) * 6.4 + 40;
+  const pill = (x, y, tone, a, b) => { a = trText(a); b = trText(b); // measure the text that will be shown (English is wider)
+    const la = vis(a) * 6.4, w = la + vis(b) * 6.4 + 40;
     return `<g class="cc-pill ${tone}" transform="translate(${(x - w / 2).toFixed(1)},${(y - 12).toFixed(1)})"><rect width="${w.toFixed(1)}" height="24" rx="12"/><circle cx="13" cy="12" r="3.5"/>
       <text x="22" y="16">${esc(a)}</text><path d="M${(22 + la + 6).toFixed(1)} 6 v12"/><text class="b" x="${(22 + la + 12).toFixed(1)}" y="16">${esc(b)}</text></g>`; };
   // two parallel dashed lines, like the reference
@@ -1900,7 +1901,7 @@ async function pageLogs() {
       { h: 'ผู้ทำ', v: a => a.actor.startsWith('user:') ? `<b style="font-weight:500">${esc(a.actor.slice(5))}</b>` : `<span class="mute">${esc(actorName(a.actor))}</span>` },
       { h: 'การกระทำ', v: a => esc(actionTh(a.action)) },
       { h: 'เครื่อง / สิ่งที่ถูกทำ', v: a => `<span translate="no">${logObject(a)}</span>` },
-      { h: 'รายละเอียด', v: a => `<span translate="no">${logDetail(a)}</span>` },
+      { h: 'รายละเอียด', v: a => `<span>${logDetail(a)}</span>` },
       { h: '', cls: 'actions', v: a => a.data && a.data.command_id ? `<button class="btn sm ghost" data-cmd-out="${esc(a.data.command_id)}">${ic('log')}ดูผล</button>`
           : a.object_type === 'command' ? `<button class="btn sm ghost" data-cmd-out="${esc(a.object_id)}">${ic('log')}ดูผล</button>` : '' },
     ], empty('audit', 'ไม่พบบันทึกตามตัวกรอง')),
@@ -3605,6 +3606,9 @@ const TH_LOAN = [['รีสตาร์ต', 'Restart'], ['รีบูต', 'R
   ['แบตเตอรี่', 'Battery'], ['สแนปช็อต', 'Snapshot'], ['ลิงก์', 'Link'], ['แท็บ', 'Tab'], ['เบราว์เซอร์', 'Browser'], ['ซิงก์', 'Sync'], ['บูต', 'Boot'],
   ['คอนโซล', 'Console'], ['ล็อกอิน', 'Sign-in'], ['เซสชัน', 'Session'], ['แชต', 'Chat'], ['พาสเวิร์ด', 'Password']];
 const EN_RULES = [
+  [/Machines online\s*(\d[\d,]*)\s*จาก\s*(\d[\d,]*)\s*เครื่อง/g, '$1 of $2 machines online'],
+  [/มี\s*(\d[\d,]*)\s*เรื่องที่ต้องดู/g, '$1 issues need attention,'], [/เก็บย้อนหลัง\s*(\d+)\s*เดือน/g, 'keeps the last $1 months,'],
+  [/ผิดครั้งที่\s*(\d+)\s*จาก IP นี้ใน 15 นาที/g, 'failure $1 from this IP in 15 min'], [/ลบ\s*([\d,]+)\s*รายการที่เก่ากว่า\s*(\d+)\s*วัน/g, 'deleted $1 entries older than $2 days'],
   [/ออนไลน์\s*(\d[\d,]*)\s*จาก\s*(\d[\d,]*)\s*เครื่อง/g, 'online $1 of $2 machines'], [/ออนไลน์\s*(\d[\d,]*)\s*จาก\s*(\d[\d,]*)/g, 'online $1 of $2'],
   [/จาก\s*(\d[\d,]*)\s*เครื่อง/g, 'of $1 machines'], [/(\d[\d,]*)\s*เครื่อง/g, '$1 machines'], [/(\d[\d,]*)\s*รายการ/g, '$1 entries'], [/(\d[\d,]*)\s*คำสั่ง/g, '$1 commands'], [/(\d[\d,]*)\s*งาน/g, '$1 jobs'],
   [/(\d[\d,]*)\s*นาที/g, '$1 min'], [/(\d[\d,]*)\s*ชั่วโมง/g, '$1 h'], [/(\d[\d,]*)\s*ชม\./g, '$1 h'], [/(\d[\d,]*)\s*วัน/g, '$1 days'], [/(\d[\d,]*)\s*วินาที/g, '$1 s'],
