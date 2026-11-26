@@ -208,6 +208,7 @@ func Run(ctx context.Context, lg *log.Logger) error {
 	inventoryKick = invNow
 	pkgLog = lg
 	go commandLoop(cctx, &execCtx{c: NewClient(st.Server, st.Pin), tok: tok, st: st, lg: lg, restart: restart, invNow: invNow})
+	startPluginServices(cctx, NewClient(st.Server, st.Pin), tok, lg) // optional plugins that are linked in
 
 	// Tell the server we are going away (shutdown, reboot, service stop, update) so the
 	// machine shows offline at once instead of after the presence timeout.
@@ -323,6 +324,7 @@ func inventorySignature(raw []byte) string {
 			delete(il, "checked_at")
 		}
 	}
+	dropPluginVolatile(m)
 	if mem, ok := m["memory"].(map[string]any); ok {
 		delete(mem, "free")
 	}

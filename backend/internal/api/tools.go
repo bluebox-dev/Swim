@@ -26,6 +26,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"swim/backend/plugin"
 )
 
 // psq quotes a PowerShell single-quoted string. PowerShell also treats the typographic
@@ -396,6 +398,10 @@ type toolScript struct {
 func buildTool(id string, params map[string]any) (*toolScript, string) {
 	t, ok := tools[id]
 	if !ok {
+		if f, ok := plugin.Tool(id); ok { // a read-only tool of a linked plugin; it takes no parameters
+			name, body := f()
+			return &toolScript{ID: id, Name: name, Body: body, Shown: body, Timeout: 600, Params: map[string]any{}}, ""
+		}
 		return nil, "ไม่รู้จักเครื่องมือนี้"
 	}
 	if params == nil {

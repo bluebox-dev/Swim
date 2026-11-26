@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -23,6 +24,7 @@ import (
 	"swim/backend/internal/vm"
 	"swim/backend/internal/wol"
 	"swim/backend/migrations"
+	"swim/backend/plugin"
 	"swim/pkg/wof"
 )
 
@@ -83,6 +85,22 @@ func run(log *slog.Logger) error {
 	}
 	if err := db.Migrate(ctx, migrateDSN, migrations.FS, log); err != nil {
 		return err
+	}
+	// plugins that are linked in (plugins_gen.go): their own tables, after the core's
+	for _, p := range plugin.All() {
+		log.Info("plugin", "name", p.Name, "version", p.Version)
+		if p.Migrations == nil {
+			continue
+		}
+		names, _ := fs.Glob(p.Migrations, "*.sql")
+		for _, n := range names {
+			if !strings.HasPrefix(n, p.Name+"_") {
+				return fmt.Errorf("plugin %s: migration %s must be named %s_*.sql", p.Name, n, p.Name)
+			}
+		}
+		if err := db.Migrate(ctx, migrateDSN, p.Migrations, log); err != nil {
+			return fmt.Errorf("plugin %s: %w", p.Name, err)
+		}
 	}
 	pool, err := pgxpool.New(ctx, appDSN)
 	if err != nil {

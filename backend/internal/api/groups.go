@@ -19,6 +19,7 @@ import (
 
 	"swim/backend/internal/audit"
 	"swim/backend/internal/ids"
+	"swim/backend/plugin"
 	"swim/pkg/manifest"
 )
 
@@ -70,6 +71,18 @@ func (s *Server) planCommand(ctx context.Context, hostID, typ string, rawArgs js
 
 	var args any = map[string]any{}
 	auditArgs := map[string]any{}
+	if pc, ok := plugin.CommandOf(typ); ok { // a command type that belongs to a linked plugin
+		if pc.MinAgent != "" && versionLess(agentVer, pc.MinAgent) {
+			return nil, &cmdErr{http.StatusConflict, "agent " + agentVer + " does not know " + typ + " — it updates itself to " + pc.MinAgent + " shortly"}
+		}
+		a, logged, err := pc.Check(rawArgs)
+		if err != nil {
+			return nil, &cmdErr{http.StatusBadRequest, err.Error()}
+		}
+		if args = a; logged != nil {
+			auditArgs = logged
+		}
+	}
 	switch typ {
 	case "reboot":
 		var a manifest.RebootArgs
@@ -218,6 +231,10 @@ func (s *Server) planCommand(ctx context.Context, hostID, typ string, rawArgs js
 			return nil, &cmdErr{http.StatusConflict, "agent " + agentVer + " cannot apply machine policy — it updates itself to " + minPolicyAgent + " shortly"}
 		}
 		args, auditArgs = a, map[string]any{"install_lock": a.InstallLock, "keep": a.Keep}
+	case "sign_out_stale":
+		if versionLess(agentVer, minSignOutAgent) {
+			return nil, &cmdErr{http.StatusConflict, "agent " + agentVer + " cannot sign users out — it updates itself to " + minSignOutAgent + " shortly"}
+		}
 	case "update_agent":
 		var latest manifest.UpdateArgs
 		b, err := os.ReadFile(filepath.Join(s.cfg.StorageDir, "agent", "latest.json"))

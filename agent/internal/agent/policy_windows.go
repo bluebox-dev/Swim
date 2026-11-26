@@ -19,9 +19,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +43,9 @@ type adminInfo struct {
 	Name  string `json:"name"`
 	SID   string `json:"sid"`
 	Class string `json:"class,omitempty"`
+	// RemovedAt: when the lock took this account out of Administrators. A session that began
+	// before it still carries the administrator token until that user signs out.
+	RemovedAt time.Time `json:"removed_at,omitempty"`
 }
 
 var policyMu sync.Mutex
@@ -62,8 +67,8 @@ func savePolicy(p policyFile) {
 
 // adminsScript lists the members of the local Administrators group (by SID, so it works
 // on any Windows language) as JSON: [{name, sid, class}].
-const adminsScript = `
-$gn = (New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-544').Translate([Security.Principal.NTAccount]).Value.Split('\')[-1]
+const membersScript = `
+$gn = (New-Object Security.Principal.SecurityIdentifier '%s').Translate([Security.Principal.NTAccount]).Value.Split('\')[-1]
 $g = [ADSI]("WinNT://$env:COMPUTERNAME/$gn,group")
 $list = @(foreach ($m in @($g.Invoke('Members'))) {
   $t = $m.GetType()
@@ -86,8 +91,15 @@ func keepAdmin(a adminInfo, keep []string) bool {
 	return false
 }
 
-func listAdmins(ctx context.Context) ([]adminInfo, error) {
-	out, err := ps(ctx, time.Minute, adminsScript+`ConvertTo-Json -InputObject $list -Compress`)
+const (
+	adminsSID = "S-1-5-32-544" // BUILTIN\Administrators
+	usersSID  = "S-1-5-32-545" // BUILTIN\Users
+)
+
+func listAdmins(ctx context.Context) ([]adminInfo, error) { return listMembers(ctx, adminsSID) }
+
+func listMembers(ctx context.Context, group string) ([]adminInfo, error) {
+	out, err := ps(ctx, time.Minute, fmt.Sprintf(membersScript, group)+`if ($list.Count -eq 0) { '[]' } else { ConvertTo-Json -InputObject $list -Compress }`)
 	if err != nil {
 		return nil, err
 	}
@@ -121,11 +133,31 @@ Remove-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore' -Name Remov
 'ok'`
 
 func groupMemberOp(ctx context.Context, op, sid string) error {
+	return groupOp(ctx, adminsSID, op, sid)
+}
+
+// ensureUser puts a demoted account in the Users group. An account made at Windows setup is
+// often a member of Administrators only: taken out of it, it is in no group at all, Windows
+// hides it from the sign-in screen and refuses its sign-in.
+func ensureUser(ctx context.Context, sid string) error {
+	users, err := listMembers(ctx, usersSID)
+	if err != nil {
+		return err
+	}
+	for _, u := range users {
+		if u.SID == sid {
+			return nil
+		}
+	}
+	return groupOp(ctx, usersSID, "Add", sid)
+}
+
+func groupOp(ctx context.Context, group, op, sid string) error {
 	if !strings.HasPrefix(sid, "S-1-") || strings.ContainsAny(sid, "'\"`$ ") {
 		return fmt.Errorf("invalid SID %q", sid)
 	}
-	_, err := ps(ctx, time.Minute, fmt.Sprintf(`$gn = (New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-544').Translate([Security.Principal.NTAccount]).Value.Split('\')[-1]
-$g = [ADSI]("WinNT://$env:COMPUTERNAME/$gn,group"); $g.%s('WinNT://%s'); 'ok'`, op, sid))
+	_, err := ps(ctx, time.Minute, fmt.Sprintf(`$gn = (New-Object Security.Principal.SecurityIdentifier '%s').Translate([Security.Principal.NTAccount]).Value.Split('\')[-1]
+$g = [ADSI]("WinNT://$env:COMPUTERNAME/$gn,group"); $g.%s('WinNT://%s'); 'ok'`, group, op, sid))
 	return err
 }
 
@@ -134,6 +166,11 @@ func applyPolicy(ctx context.Context, lock bool, keep []string) (string, map[str
 	policyMu.Lock()
 	defer policyMu.Unlock()
 	p := loadPolicy()
+	for i := range p.Removed { // entries written before RemovedAt existed
+		if p.Removed[i].RemovedAt.IsZero() {
+			p.Removed[i].RemovedAt = p.AppliedAt
+		}
+	}
 	var log []string
 	if lock {
 		admins, err := listAdmins(ctx)
@@ -152,17 +189,34 @@ func applyPolicy(ctx context.Context, lock bool, keep []string) (string, map[str
 				log = append(log, "skipped "+a.Name+" (no SID)")
 				continue
 			}
+			if err := ensureUser(ctx, a.SID); err != nil { // first, so the account is never in no group
+				return "", nil, fmt.Errorf("add %s to Users: %w", a.Name, err)
+			}
 			if err := groupMemberOp(ctx, "Remove", a.SID); err != nil {
 				return "", nil, fmt.Errorf("remove %s from Administrators: %w", a.Name, err)
 			}
+			a.RemovedAt = time.Now().UTC()
 			if !have[a.SID] {
 				p.Removed = append(p.Removed, a)
 				have[a.SID] = true
+			} else { // demoted before, made an administrator again, demoted again now
+				for i := range p.Removed {
+					if p.Removed[i].SID == a.SID {
+						p.Removed[i].RemovedAt = a.RemovedAt
+					}
+				}
 			}
 			log = append(log, "removed "+a.Name+" from Administrators")
 			// save after each change: a crash must not lose who to restore
 			p.InstallLock, p.Keep = true, keep
 			savePolicy(p)
+		}
+		for _, r := range p.Removed { // accounts demoted by an agent older than 0.5.29
+			if err := ensureUser(ctx, r.SID); err != nil {
+				log = append(log, "could not add "+r.Name+" to Users: "+err.Error())
+			} else {
+				log = append(log, r.Name+" is in Users (can sign in as a standard account)")
+			}
 		}
 		if _, err := ps(ctx, time.Minute, lockRegistry); err != nil {
 			return "", nil, err
@@ -194,20 +248,23 @@ func applyPolicy(ctx context.Context, lock bool, keep []string) (string, map[str
 }
 
 type lockState struct {
-	Desired   bool        `json:"desired"`
-	Applied   bool        `json:"applied"` // the machine is in the desired state
-	Locked    bool        `json:"locked"`  // all lock settings are in place right now
-	Problem   string      `json:"problem,omitempty"`
-	Admins    []string    `json:"admins"`
-	Removed   []string    `json:"removed"`
-	CheckedAt time.Time   `json:"checked_at"`
-	Error     string      `json:"error,omitempty"`
-	removed   []adminInfo `json:"-"`
+	Desired bool     `json:"desired"`
+	Applied bool     `json:"applied"` // the machine is in the desired state
+	Locked  bool     `json:"locked"`  // all lock settings are in place right now
+	Problem string   `json:"problem,omitempty"`
+	Admins  []string `json:"admins"`
+	Removed []string `json:"removed"`
+	// PendingSignOut: demoted accounts still signed in from before the lock. Windows fixes a
+	// user's rights at sign-in, so they keep administrator rights until they sign out.
+	PendingSignOut []string    `json:"pending_sign_out"`
+	CheckedAt      time.Time   `json:"checked_at"`
+	Error          string      `json:"error,omitempty"`
+	removed        []adminInfo `json:"-"`
 }
 
 func policyState(ctx context.Context) lockState {
 	p := loadPolicy()
-	st := lockState{Desired: p.InstallLock, CheckedAt: time.Now().UTC(), Admins: []string{}, Removed: []string{}, Error: p.Error}
+	st := lockState{Desired: p.InstallLock, CheckedAt: time.Now().UTC(), Admins: []string{}, Removed: []string{}, PendingSignOut: []string{}, Error: p.Error}
 	for _, r := range p.Removed {
 		st.Removed = append(st.Removed, r.Name)
 	}
@@ -235,9 +292,34 @@ $s=(Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore' -ErrorActi
 		}
 	}
 	st.Locked = regLocked && len(extra) == 0
+	noGroup := []string{}
+	if p.InstallLock && len(p.Removed) > 0 {
+		if users, err := listMembers(ctx, usersSID); err == nil {
+			in := map[string]bool{}
+			for _, u := range users {
+				in[u.SID] = true
+			}
+			for _, r := range p.Removed {
+				if r.SID != "" && !in[r.SID] {
+					noGroup = append(noGroup, r.Name)
+				}
+			}
+		}
+	}
+	if p.InstallLock {
+		seen := map[string]bool{}
+		for _, s := range staleAdminSessions(ctx, p) {
+			if !seen[s.Name] {
+				seen[s.Name] = true
+				st.PendingSignOut = append(st.PendingSignOut, s.Name)
+			}
+		}
+	}
 	switch {
 	case p.InstallLock && !regLocked:
 		st.Problem = "lock settings missing"
+	case len(noGroup) > 0:
+		st.Problem = "cannot sign in (not in Users): " + strings.Join(noGroup, ", ")
 	case p.InstallLock && len(extra) > 0:
 		st.Problem = "not allowed in Administrators: " + strings.Join(extra, ", ")
 	case !p.InstallLock && len(p.Removed) > 0:
@@ -245,6 +327,93 @@ $s=(Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore' -ErrorActi
 	}
 	st.Applied = st.Problem == "" && (p.InstallLock == st.Locked || !p.InstallLock)
 	return st
+}
+
+type staleSession struct {
+	Name    string
+	Session int
+}
+
+// staleAdminSessions: sessions of demoted accounts that began before the demotion. Read from
+// each session's explorer.exe (its owner and start time), which works on any Windows language.
+func staleAdminSessions(ctx context.Context, p policyFile) []staleSession {
+	if len(p.Removed) == 0 {
+		return nil
+	}
+	out, err := ps(ctx, time.Minute, `
+$r = @(Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" | ForEach-Object {
+  $o = Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid
+  [pscustomobject]@{ sid = [string]$o.Sid; session = [int]$_.SessionId; since = $_.CreationDate.ToUniversalTime().ToString('o') }
+})
+if ($r.Count -eq 0) { '[]' } else { ConvertTo-Json -InputObject $r -Compress }`)
+	if err != nil {
+		return nil
+	}
+	return matchStaleSessions(out, p)
+}
+
+func matchStaleSessions(out string, p policyFile) []staleSession {
+	i := strings.IndexAny(out, "[{")
+	if i < 0 {
+		return nil
+	}
+	js := strings.TrimSpace(out[i:])
+	if strings.HasPrefix(js, "{") {
+		js = "[" + js + "]"
+	}
+	var procs []struct {
+		SID     string `json:"sid"`
+		Session int    `json:"session"`
+		Since   string `json:"since"`
+	}
+	if json.Unmarshal([]byte(js), &procs) != nil {
+		return nil
+	}
+	var stale []staleSession
+	done := map[int]bool{}
+	for _, pr := range procs {
+		since, err := time.Parse(time.RFC3339Nano, pr.Since)
+		if err != nil || done[pr.Session] {
+			continue
+		}
+		for _, r := range p.Removed {
+			at := r.RemovedAt
+			if at.IsZero() { // policy file written before RemovedAt existed
+				at = p.AppliedAt
+			}
+			if r.SID != "" && r.SID == pr.SID && since.Before(at) {
+				done[pr.Session] = true
+				stale = append(stale, staleSession{Name: r.Name, Session: pr.Session})
+			}
+		}
+	}
+	return stale
+}
+
+// signOutStale signs out the demoted accounts that are still signed in from before the lock,
+// and nobody else. Unsaved work in those sessions is lost.
+func signOutStale(ctx context.Context) (string, any, error) {
+	policyMu.Lock()
+	p := loadPolicy()
+	policyMu.Unlock()
+	if !p.InstallLock {
+		return "", nil, errors.New("the install lock is off on this machine")
+	}
+	stale := staleAdminSessions(ctx, p)
+	if len(stale) == 0 {
+		return "nobody is signed in with rights from before the lock", map[string]any{"install_lock": policyState(ctx)}, nil
+	}
+	var log []string
+	var failed error
+	for _, s := range stale {
+		if err := logoffSession(ctx, s.Session); err != nil {
+			failed = err
+			log = append(log, fmt.Sprintf("could not sign out %s (session %d): %v", s.Name, s.Session, err))
+			continue
+		}
+		log = append(log, fmt.Sprintf("signed out %s (session %d)", s.Name, s.Session))
+	}
+	return strings.Join(log, "\n"), map[string]any{"install_lock": policyState(ctx)}, failed
 }
 
 var lastReapply time.Time
@@ -266,6 +435,44 @@ func setPolicy(ctx context.Context, a manifest.SetPolicyArgs) (string, any, erro
 		p := loadPolicy()
 		p.Error = err.Error()
 		savePolicy(p)
+		return out, data, err
+	}
+	if a.InstallLock && a.SignOutS > 0 {
+		if stale := staleAdminSessions(ctx, loadPolicy()); len(stale) > 0 {
+			wait := time.Duration(min(max(a.SignOutS, 15), 600)) * time.Second
+			names := []string{}
+			for _, s := range stale {
+				names = append(names, s.Name)
+			}
+			out += fmt.Sprintf("\n%s told to save their work; signed out in %d s so the lock takes effect", strings.Join(names, ", "), int(wait.Seconds()))
+			go signOutAfter(wait, stale)
+		}
 	}
 	return out, data, err
+}
+
+const signOutNotice = "IT ล็อกการติดตั้งโปรแกรมบนเครื่องนี้ผ่าน SWIM เครื่องจะออกจากระบบใน %d วินาที กรุณาบันทึกงาน แล้วเข้าใช้งานใหม่ได้ทันที"
+
+// signOutAfter warns each session, waits, then signs out the ones that are still stale.
+func signOutAfter(wait time.Duration, stale []staleSession) {
+	ctx := context.Background()
+	for _, s := range stale {
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		_ = command(c, "msg.exe", strconv.Itoa(s.Session), fmt.Sprintf("/TIME:%d", int(wait.Seconds())), fmt.Sprintf(signOutNotice, int(wait.Seconds()))).Run()
+		cancel()
+	}
+	time.Sleep(wait)
+	policyMu.Lock()
+	p := loadPolicy()
+	policyMu.Unlock()
+	if !p.InstallLock { // unlocked in the meantime
+		return
+	}
+	for _, s := range staleAdminSessions(ctx, p) {
+		err := logoffSession(ctx, s.Session)
+		if pkgLog != nil {
+			pkgLog.Printf("install lock: signed out %s (session %d) %v", s.Name, s.Session, err)
+		}
+	}
+	requestInventory()
 }

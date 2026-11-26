@@ -4,8 +4,8 @@ set -euo pipefail
 DATA=${SWIM_DATA:-/srv/swim}
 HERE=$(cd "$(dirname "$0")/.." && pwd)     # builder-infra/
 
-sudo mkdir -p "$DATA"/{storage/{images,winpe,drivers,agent,logs},keys,certs,vms/{nvram,iso},backups,run,audit-archive,winpe-base}
-sudo chmod 750 "$DATA/audit-archive"
+sudo mkdir -p "$DATA"/{storage/{images,winpe,drivers,agent,logs},keys,certs,vms/{nvram,iso},backups,run,audit-archive,plugins,winpe-base}
+sudo chmod 750 "$DATA/audit-archive" "$DATA/plugins"
 sudo chown -R "$(id -u):$(id -g)" "$DATA"/{storage,certs,backups}
 sudo chmod 700 "$DATA/keys"
 

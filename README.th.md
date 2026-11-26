@@ -30,6 +30,7 @@ SWIM สร้าง image ของ Windows จากเครื่องต�
 - [ภาพหน้าจอ](#ภาพหน้าจอ)
 - [การออกแบบระบบ](#การออกแบบระบบ)
 - [ติดตั้ง](#ติดตั้ง)
+- [ส่วนเสริม (plugin)](#ส่วนเสริม-plugin)
 - [โครงสร้างของ repository](#โครงสร้างของ-repository)
 - [สิ่งที่ไม่อยู่ใน repository นี้](#สิ่งที่ไม่อยู่ใน-repository-นี้)
 - [เอกสาร](#เอกสาร)
@@ -255,6 +256,23 @@ cd /opt/swim
 
 สคริปต์ติดตั้งแพ็กเกจ สร้างรหัสลับชุดใหม่ สร้างใบรับรอง TLS ตั้ง firewall build และสตาร์ตระบบ
 แล้วบอกวิธีเข้าใช้งานครั้งแรก ขั้นตอนทั้งหมดรวมถึงการสร้าง image แรกอยู่ใน [docs/INSTALL.th.md](docs/INSTALL.th.md)
+
+## ส่วนเสริม (plugin)
+
+ฟีเจอร์เสริมอยู่นอกระบบหลัก ในโฟลเดอร์ [`plugins/`](plugins/README.md) plugin จะถูกรวมเข้าไปใน
+server และ agent ก็ต่อเมื่อสั่งเปิด ถ้า clone มาใหม่จะได้ระบบหลักอย่างเดียว
+
+| Plugin | เพิ่มอะไร |
+|---|---|
+| [`exam`](plugins/exam/README.md) | โหมดสอบ: จำกัดเว็บ โปรแกรม และ USB เก็บข้อมูลระหว่างการสอบ และเก็บภาพหน้าจอเป็นหลักฐานเมื่อพบการทำผิด |
+
+```bash
+builder-infra/scripts/plugin.sh list
+builder-infra/scripts/plugin.sh enable exam
+builder-infra/scripts/plugin.sh disable exam
+```
+
+วิธีเขียน plugin ของตัวเองอยู่ใน [plugins/README.md](plugins/README.md)
 
 ## โครงสร้างของ repository
 

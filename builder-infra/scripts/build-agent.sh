@@ -8,8 +8,9 @@ DATA=${SWIM_DATA:-/srv/swim}; OUT=$DATA/storage/agent
 VER=$(grep -E '^const Version' "$ROOT/agent/internal/agent/state.go" | cut -d'"' -f2)
 GO="sudo docker run --rm -v $ROOT:/src -v swim-gocache:/root/.cache -w /src -e CGO_ENABLED=0 golang:1.24-bookworm"
 
+sudo bash "$HERE/scripts/plugin.sh" gen   # link in the plugins named in plugins/enabled
 echo "== vet + test"
-$GO sh -c 'go vet ./agent/... && GOOS=windows go vet ./agent/... && go test ./agent/...'
+$GO sh -c 'go vet ./agent/... ./plugins/... && GOOS=windows go vet ./agent/... ./plugins/... && go test ./agent/...'
 echo "== build $VER"
 $GO sh -c "GOOS=windows GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o .build/swim-agent-$VER-windows-amd64.exe ./agent/cmd/swim-agent && \
            GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o .build/swim-agent-$VER-linux-amd64 ./agent/cmd/swim-agent"

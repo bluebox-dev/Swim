@@ -198,6 +198,7 @@ func (s *Server) Handler() http.Handler {
 	// admin
 	a := s.requireAdmin
 	m.HandleFunc("GET /v1/whoami", a(s.whoami))
+	s.pluginRoutes(m) // optional plugins that are linked in (plugins.go)
 	m.HandleFunc("GET /v1/users", a(s.listUsers))
 	m.HandleFunc("POST /v1/users", a(s.createUser))
 	m.HandleFunc("POST /v1/users/{id}/{action}", a(s.userAction))

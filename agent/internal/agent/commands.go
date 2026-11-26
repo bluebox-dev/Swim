@@ -207,7 +207,7 @@ func handleCommand(ctx context.Context, ec *execCtx, keys *manifest.Keyset, seen
 	clearInflight(cmd.CommandID)
 
 	switch cmd.Type {
-	case "run_script", "remote_session", "release_staging", "reboot", "set_policy", "prestage_image":
+	case "run_script", "remote_session", "release_staging", "reboot", "set_policy", "sign_out_stale", "prestage_image":
 		// these can change what the host page shows (Remote Desktop, accounts, disks…):
 		// report the new state now instead of at the next 2-minute check
 		requestInventory()
@@ -240,6 +240,11 @@ func handleCommand(ctx context.Context, ec *execCtx, keys *manifest.Keyset, seen
 }
 
 func execute(ctx context.Context, ec *execCtx, cmd manifest.Command) (string, any, *int, error) {
+	if h := pluginCommand(cmd.Type); h != nil { // a command type of a linked plugin
+		out, data, err := h(ctx, cmd.Args)
+		requestInventory()
+		return out, data, nil, err
+	}
 	switch cmd.Type {
 	case "ping":
 		host, _ := os.Hostname()
@@ -328,6 +333,9 @@ func execute(ctx context.Context, ec *execCtx, cmd manifest.Command) (string, an
 			return "", nil, nil, errors.New("invalid arguments")
 		}
 		out, data, err := setPolicy(ctx, a)
+		return out, data, nil, err
+	case "sign_out_stale":
+		out, data, err := signOutStale(ctx)
 		return out, data, nil, err
 	case "prestage_image":
 		var a manifest.PrestageArgs

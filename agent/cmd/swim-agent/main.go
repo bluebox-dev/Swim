@@ -83,6 +83,9 @@ func main() {
 	case "version":
 		fmt.Println("swim-agent", agent.Version)
 	default:
+		if run := agent.PluginSubcommand(os.Args[1]); run != nil { // a helper mode of a linked plugin
+			os.Exit(run(os.Args[2:]))
+		}
 		usage()
 	}
 	if errors.Is(err, agent.ErrRestart) {

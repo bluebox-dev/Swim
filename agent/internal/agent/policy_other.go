@@ -12,3 +12,7 @@ import (
 func setPolicy(context.Context, manifest.SetPolicyArgs) (string, any, error) {
 	return "", nil, errors.New("install lock exists only on Windows")
 }
+
+func signOutStale(context.Context) (string, any, error) {
+	return "", nil, errors.New("install lock exists only on Windows")
+}

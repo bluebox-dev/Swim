@@ -275,6 +275,7 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 	s.markOnline(hostID, s.pres.touch(hostID))
 	s.autoUpdateAgent(r.Context(), hostID, in.AgentVersion)
 	s.reconcilePolicy(r.Context(), hostID, in.AgentVersion)
+	s.pluginHeartbeat(r.Context(), hostID, in.AgentVersion)
 	s.reconcilePrestage(r.Context(), hostID, in.AgentVersion)
 	s.watchHandoff(r.Context(), hostID)
 	if inv != nil {

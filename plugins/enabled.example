@@ -1,0 +1,4 @@
+# Plugins linked into this server and its agent, one name per line (a folder under plugins/).
+# Copy this file to plugins/enabled, or use:  builder-infra/scripts/plugin.sh enable <name>
+#
+# exam

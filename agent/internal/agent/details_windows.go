@@ -83,6 +83,9 @@ func CollectDetails(ctx context.Context) (json.RawMessage, error) {
 		m["prestage"], _ = json.Marshal(prestageInfo())
 		st := policyState(ctx)
 		m["policy"], _ = json.Marshal(map[string]any{"install_lock": st})
+		if pl := pluginInventory(ctx); pl != nil {
+			m["plugins"], _ = json.Marshal(pl)
+		}
 		if pkgLog != nil {
 			go reconcilePolicy(context.Background(), st, pkgLog)
 		}

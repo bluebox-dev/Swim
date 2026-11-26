@@ -1625,5 +1625,20 @@
 "Agent รุ่นนี้ยังเปิดอุโมงค์ Remote ไม่ได้ รอ Agent อัปเดตเป็น 0.5.24 ก่อน แล้ว Remote จะใช้ได้เอง": "This agent version cannot open a remote tunnel yet. Remote Desktop will work once the agent has updated itself to 0.5.24",
 "ตรวจความพร้อม UEFI / Windows 11": "UEFI / Windows 11 readiness",
 "โหมดบูต ดิสก์ MBR/GPT TPM และ CPU": "Boot mode, MBR/GPT disk, TPM and CPU",
-"ตรวจความพร้อม UEFI และ Windows 11": "UEFI and Windows 11 readiness check"
+"ตรวจความพร้อม UEFI และ Windows 11": "UEFI and Windows 11 readiness check",
+"รอผู้ใช้ออกจากระบบ": "Waiting for the user to sign out",
+"รอออกจากระบบ": "Sign-out pending",
+"เข้าใช้งานอยู่ตั้งแต่ก่อนล็อก จึงยังติดตั้งโปรแกรมได้จนกว่าจะออกจากระบบหรือรีสตาร์ตเครื่อง": "signed in before the lock and can still install programs until they sign out or the machine restarts",
+"ให้ผู้ใช้ออกจากระบบ?": "Sign the user out?",
+"ให้ผู้ใช้ออกจากระบบ": "Sign the user out",
+"จะถูกออกจากระบบทันที เพื่อให้การล็อกการติดตั้งโปรแกรมมีผล": "will be signed out now, so the install lock takes effect",
+"งานที่ยังไม่ได้บันทึกของผู้ใช้จะหาย ควรแจ้งผู้ใช้ให้บันทึกงานก่อน": "The user's unsaved work will be lost. Tell them to save first.",
+"ผู้ใช้เข้าใช้งานใหม่ได้ทันทีด้วยบัญชีเดิม โดยเป็นบัญชีธรรมดา": "The user can sign in again right away with the same account, as a standard account.",
+"ผู้ใช้ที่เข้าใช้งานอยู่และเสียสิทธิ์ผู้ดูแลจะเห็นข้อความเตือนให้บันทึกงาน แล้วถูกออกจากระบบใน 1 นาที เพื่อให้การล็อกมีผลทันที": "Signed-in users who lose admin rights see a notice to save their work and are signed out after 1 minute, so the lock takes effect right away.",
+"โปรแกรมแบบไม่ต้องติดตั้ง (portable) ยังเปิดได้ เครื่องที่ต่อ server ผ่าน VPN ต้องตั้ง VPN ให้ต่อเองก่อนล็อก เพราะบัญชีธรรมดาอาจเปิด VPN เองไม่ได้": "Portable programs still run. A machine that reaches the server through a VPN needs the VPN to connect by itself before you lock it: a standard account may not be able to start the VPN.",
+"เว็บ": "Web",
+"กำหนดเอง": "Custom",
+"หน้าต่าง": "window",
+"เครื่อง:": "Machine:",
+"ส่วนเสริม": "Add-ons"
 }

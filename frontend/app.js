@@ -393,6 +393,7 @@ function renderShell() {
       <nav class="nav">
         <div class="nav-label">ภาพรวม</div>${nav('home')}${nav('hosts')}${nav('schedule')}
         <div class="nav-label">Windows</div>${nav('images', pendingImages ? `<span class="count warn" title="รออนุมัติ">${pendingImages}</span>` : '')}
+        ${PLUGINS.some(p => p.page) ? `<div class="nav-label">ส่วนเสริม</div>${PLUGINS.filter(p => p.page).map(p => nav(p.name)).join('')}` : ''}
         <div class="nav-label">ระบบ</div>${nav('logs')}${nav('storage')}${nav('settings')}
       </nav>
       <div class="side-foot">
@@ -1706,6 +1707,7 @@ async function pageHosts() {
         return `<button class="btn sm" data-bulk="wake" ${n ? '' : `disabled title="${sel.length ? 'เครื่องที่เลือกเปิดอยู่แล้ว หรือยังไม่รู้ MAC' : ''}"`}>${ic('power')}ปลุกเครื่อง${n ? ` (${n})` : ''}</button>`; })()}
       <button class="btn sm" data-bulk="lock">${ic('shield')}ล็อกการติดตั้ง</button>
       <button class="btn sm" data-bulk="unlock">ปลดล็อก</button>
+      ${PLUGINS.map(p => p.bulkButtons ? p.bulkButtons() : '').join('')}
       <button class="btn sm" data-bulk="clear-history">${ic('trash')}ล้างประวัติคำสั่ง</button>
       <button class="btn sm" data-bulk="prestage">${ic('hdd')}เก็บ image ล่วงหน้า</button>
       <button class="btn sm" data-bulk="deploy">${ic('capture')}ล้างเครื่องและติดตั้ง</button>
@@ -2201,7 +2203,7 @@ function watchEnroll() {
 const CMD = {
   ping: ['ทดสอบการเชื่อมต่อ', 'link'], collect_logs: ['เก็บ Log และข้อมูลระบบ', 'log'], refresh_inventory: ['อัปเดตข้อมูลเครื่อง', 'refresh'],
   update_agent: ['อัปเดต Agent', 'capture'], reimage: ['ล้างเครื่องและติดตั้ง Windows', 'capture'], restart_agent: ['รีสตาร์ต Agent', 'reset'], reboot: ['รีบูตเครื่อง', 'power'],
-  run_script: ['รันสคริปต์', 'console'], uninstall_agent: ['ถอนการติดตั้ง Agent', 'trash'], delete_staged_image: ['ลบ image ที่เก็บในเครื่อง', 'trash'], release_staging: ['คืนพื้นที่ที่ใช้ติดตั้ง', 'hdd'], remote_session: ['เปิดรีโมต (ไม่ใช้รหัส)', 'console'], rehandoff: ['บูตเข้า WinPE อีกครั้ง', 'refresh'], set_policy: ['ตั้งนโยบายเครื่อง', 'shield'], prestage_image: ['เก็บ image ไว้ในเครื่อง', 'hdd'], wake: ['ส่ง Wake-on-LAN', 'power'],
+  run_script: ['รันสคริปต์', 'console'], uninstall_agent: ['ถอนการติดตั้ง Agent', 'trash'], delete_staged_image: ['ลบ image ที่เก็บในเครื่อง', 'trash'], release_staging: ['คืนพื้นที่ที่ใช้ติดตั้ง', 'hdd'], remote_session: ['เปิดรีโมต (ไม่ใช้รหัส)', 'console'], rehandoff: ['บูตเข้า WinPE อีกครั้ง', 'refresh'], set_policy: ['ตั้งนโยบายเครื่อง', 'shield'], sign_out_stale: ['ให้ผู้ใช้ออกจากระบบ', 'power'], prestage_image: ['เก็บ image ไว้ในเครื่อง', 'hdd'], wake: ['ส่ง Wake-on-LAN', 'power'],
 };
 const CMD_STATUS = { queued: ['', 'รอเครื่องรับ'], delivered: ['info', 'ส่งถึงเครื่องแล้ว'], running: ['info', 'กำลังทำ'], done: ['ok', 'สำเร็จ'],
   failed: ['bad', 'ล้มเหลว'], expired: ['warn', 'หมดอายุ'], cancelled: ['', 'ยกเลิก'] };
@@ -2269,6 +2271,8 @@ function lockState(h) {
   const seen = m?.checked_at ? `ตรวจจากเครื่องเมื่อ ${ago(m.checked_at)}` : '';
   const tail = x => [x, seen].filter(Boolean).join(', ');
   if (want && m?.error) return { tone: 'bad', label: 'ใช้นโยบายไม่สำเร็จ', short: 'ล้มเหลว', on: true, detail: tail(m.error) };
+  if (want && m?.applied && m.desired && m.pending_sign_out?.length) return { tone: 'warn', label: 'รอผู้ใช้ออกจากระบบ', short: 'รอออกจากระบบ', on: true, pending: m.pending_sign_out,
+    detail: tail(`${m.pending_sign_out.join(', ')} เข้าใช้งานอยู่ตั้งแต่ก่อนล็อก จึงยังติดตั้งโปรแกรมได้จนกว่าจะออกจากระบบหรือรีสตาร์ตเครื่อง`) };
   if (want && m?.applied && m.desired) return { tone: 'ok', label: 'ล็อกแล้ว', short: 'ล็อกแล้ว', on: true,
     detail: tail(`ติดตั้งโปรแกรมได้เฉพาะจาก SWIM${m.admins?.length ? `, ผู้ดูแลในเครื่อง: ${m.admins.join(', ')}` : ''}`) };
   if (want) return { tone: 'info', label: 'กำลังใช้นโยบาย', short: 'กำลังล็อก', on: true,
@@ -2294,7 +2298,8 @@ function askLock(ids, label, on) {
     : '<p class="mute" style="margin:10px 0 0;font-size:13px">ไม่มีบัญชีไหนเสียสิทธิ์ผู้ดูแล</p>';
   modal({ title: on ? 'ล็อกการติดตั้งโปรแกรม?' : 'ปลดล็อกการติดตั้งโปรแกรม?', confirm: on ? 'ล็อก' : 'ปลดล็อก',
     desc: on ? `ใช้กับ <b>${esc(label)}</b> เครื่องที่ออฟไลน์จะได้รับเมื่อกลับมาออนไลน์` : `ผู้ใช้ที่เคยเป็นผู้ดูแลบน <b>${esc(label)}</b> จะได้สิทธิ์คืน และติดตั้งโปรแกรมเองได้อีก`,
-    body: (on ? LOCK_WHAT + '<p class="mute" style="margin:10px 0 0;font-size:13px">โปรแกรมแบบไม่ต้องติดตั้ง (portable) ยังเปิดได้</p>' : '') + who,
+    body: (on ? LOCK_WHAT + `<div class="callout warn" style="margin:10px 0 0">${ic('alert')}<div>ผู้ใช้ที่เข้าใช้งานอยู่และเสียสิทธิ์ผู้ดูแลจะเห็นข้อความเตือนให้บันทึกงาน แล้วถูกออกจากระบบใน 1 นาที เพื่อให้การล็อกมีผลทันที</div></div>
+      <p class="mute" style="margin:10px 0 0;font-size:13px">โปรแกรมแบบไม่ต้องติดตั้ง (portable) ยังเปิดได้ เครื่องที่ต่อ server ผ่าน VPN ต้องตั้ง VPN ให้ต่อเองก่อนล็อก เพราะบัญชีธรรมดาอาจเปิด VPN เองไม่ได้</p>` : '') + who,
     onConfirm: async () => {
       const r = ids.length === 1 ? await api('/v1/hosts/' + encodeURIComponent(ids[0]) + '/policy', 'PUT', { install_lock: on })
         : await api('/v1/hosts/policy', 'POST', { host_ids: ids, install_lock: on });
@@ -2472,7 +2477,8 @@ async function pageHost(id) {
     ${card('คำสั่งล่าสุด', running ? `กำลังทำ ${running} คำสั่ง` : 'อัปเดตสดเมื่อเครื่องตอบกลับ', table(cmds.slice(0, 5), cmdCols, empty('clock', 'ยังไม่มีคำสั่ง')),
       cmds.length > 5 ? `<button class="btn sm ghost" data-htab="history">ดูทั้งหมด ${cmds.length} รายการ</button>` : '', true)}`)}
   ${panel('windows', `${card('นโยบายเครื่อง', 'ควบคุมว่าใครติดตั้งโปรแกรมบนเครื่องนี้ได้', `<div class="remote-box">${stateBox('ติดตั้งโปรแกรม', lock)}${LOCK_WHAT}
-      <div class="btn-group">${lock.on ? `<button class="btn" data-lock="off" ${dis}>${ic('x')}ปลดล็อก</button>` : `<button class="btn primary" data-lock="on" ${dis}>${ic('shield')}ล็อกการติดตั้งโปรแกรม</button>`}</div></div>`)}
+      <div class="btn-group">${lock.pending ? `<button class="btn primary" data-sign-out="1" ${dis}>${ic('power')}ให้ผู้ใช้ออกจากระบบ</button>` : ''}${lock.on ? `<button class="btn" data-lock="off" ${dis}>${ic('x')}ปลดล็อก</button>` : `<button class="btn primary" data-lock="on" ${dis}>${ic('shield')}ล็อกการติดตั้งโปรแกรม</button>`}</div></div>`)}
+    ${PLUGINS.map(p => p.hostCard ? p.hostCard(h, dis) : '').join('')}
     ${(() => { const ps = prestageState(h); return card('เก็บ image ไว้ในเครื่องล่วงหน้า', 'ล้างเครื่องได้ทันทีโดยไม่ต้องดาวน์โหลด image จาก server', `<div class="remote-box">${stateBox('Image', ps)}
       ${ps.progress != null ? `<div class="ps-bar"><i style="width:${Math.max(2, Math.min(100, ps.progress))}%"></i></div>` : ''}${PRESTAGE_WHAT}
       <div class="btn-group"><button class="btn ${h.policy?.prestage_image_id ? '' : 'primary'}" data-prestage="${esc(h.id)}" ${dis}>${ic('hdd')}${h.policy?.prestage_image_id ? 'เปลี่ยน image ที่เก็บไว้' : 'เลือก image ที่จะเก็บไว้'}</button></div></div>`); })()}
@@ -3308,6 +3314,14 @@ document.addEventListener('click', async ev => {
         ${st ? '<br><br>ถ้าไม่มีงานที่ล้มเหลวค้างอยู่ ระบบจะคืนพื้นที่ที่ใช้ติดตั้ง (SWIMSTAGE) ให้ไดรฟ์ C: ด้วยอัตโนมัติ' : ''}`,
       onConfirm: async () => { await api('/v1/hosts/' + encodeURIComponent(b.dataset.jobsClear) + '/jobs', 'DELETE', {}); toast('ล้างประวัติการติดตั้งแล้ว'); renderPage(); } });
   }
+  if (b.dataset.signOut) {
+    const h = hostCache, who = inv(h).policy?.install_lock?.pending_sign_out || [];
+    return modal({ title: 'ให้ผู้ใช้ออกจากระบบ?', confirm: 'ออกจากระบบ',
+      desc: `<b>${who.map(esc).join(', ')}</b> บน <b>${esc(h.hostname || h.id)}</b> จะถูกออกจากระบบทันที เพื่อให้การล็อกการติดตั้งโปรแกรมมีผล`,
+      body: `<div class="callout warn">${ic('alert')}<div>งานที่ยังไม่ได้บันทึกของผู้ใช้จะหาย ควรแจ้งผู้ใช้ให้บันทึกงานก่อน</div></div>
+        <p class="mute" style="margin:10px 0 0;font-size:13px">ผู้ใช้เข้าใช้งานใหม่ได้ทันทีด้วยบัญชีเดิม โดยเป็นบัญชีธรรมดา</p>`,
+      onConfirm: () => sendCommand('sign_out_stale') });
+  }
   if (b.dataset.releaseStaging) {
     const h = hostCache, last = (jobCache || [])[0], keep = last && ['failed', 'aborted'].includes(last.status);
     return modal({ title: 'คืนพื้นที่ที่ใช้ติดตั้ง?', confirm: 'คืนพื้นที่',
@@ -3707,6 +3721,7 @@ function setLang(l) { try { localStorage.setItem('swim-lang', l); } catch (e) {}
 // ───────── boot ─────────
 async function boot() {
   if (!i18nReady) { i18nReady = true; await i18nInit(); }
+  if (!pluginsLoaded) { pluginsLoaded = true; await loadPlugins(); }
   if (!authCfg) await loadAuthCfg();
   const setupT = /^#\/setup\?t=([\w-]+)/.exec(location.hash);
   if (setupT && !me) return renderSetup({ setupToken: setupT[1] });
@@ -3718,5 +3733,39 @@ async function boot() {
   startLive();
 }
 let i18nReady = false;
+// ───────── plugins ─────────
+// Optional plugins the server has linked in (GET /v1/plugins). Each one is a script served by the
+// server under /plugins/<name>/ that calls SWIM.plugin({...}) once. The console knows nothing about
+// any particular plugin: it only offers these places to show something.
+//
+//   name, title, sub, icon      the plugin's page in the menu (when page is given)
+//   page(), after()             render the page (returns HTML) and wire it afterwards
+//   hostCard(h, dis)            a card on the Windows tab of a machine
+//   bulkButtons()               buttons in the bar shown when machines are selected
+//   actions, commands           labels for its activity-log actions and command types
+//   en                          English for its Thai interface text
+//   init(ctx)                   receives the console's helpers (api, modal, toast, card, …)
+const PLUGINS = [];
+window.SWIM = { plugin(def) {
+  if (!def || !/^[a-z][a-z0-9-]{1,30}$/.test(def.name || '') || PLUGINS.some(p => p.name === def.name)) return;
+  try {
+    def.init && def.init({ api, modal, toast, esc, ic, card, stateBox, empty, when, ago, LOC, authHeaders, verCmp, inv, $, route, routeArg, renderPage,
+      getHost: () => hostCache, getSel: () => hostSel });
+    if (def.page && !ROUTES[def.name]) ROUTES[def.name] = { title: def.title || def.name, sub: def.sub || '', icon: def.icon || 'layers', render: def.page, after: def.after };
+    Object.assign(ACTION_TH, def.actions || {}); Object.assign(CMD, def.commands || {});
+    if (EN && def.en) Object.assign(EN, def.en);
+    PLUGINS.push(def);
+  } catch (e) { console.error('plugin ' + def.name, e); } // a broken plugin must not stop the console
+} };
+let pluginsLoaded = false;
+async function loadPlugins() {
+  let list = [];
+  try { const r = await fetch('/v1/plugins', { headers: { 'X-SWIM': '1' } }); if (r.ok) list = (await r.json()).items || []; } catch (e) { /* no plugins */ }
+  await Promise.all(list.filter(p => p.js).map(p => new Promise(done => {
+    if (p.css) document.head.append(Object.assign(document.createElement('link'), { rel: 'stylesheet', href: p.css }));
+    document.head.append(Object.assign(document.createElement('script'), { src: p.js, onload: done, onerror: done }));
+    setTimeout(done, 8000);
+  })));
+}
 boot();
 })();

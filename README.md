@@ -33,6 +33,7 @@ walking to the machine.
   - [Reimage flow](#reimage-flow)
   - [Trust and security model](#trust-and-security-model)
 - [Quick start](#quick-start)
+- [Plugins](#plugins)
 - [Repository layout](#repository-layout)
 - [What is not in this repository](#what-is-not-in-this-repository)
 - [Documentation](#documentation)
@@ -271,6 +272,25 @@ The script installs the host packages, generates fresh secrets and a TLS certifi
 the firewall, builds and starts the stack, and prints how to sign in for the first time. The full
 walkthrough, including building the first image, is in [docs/INSTALL.md](docs/INSTALL.md).
 
+## Plugins
+
+Optional features live outside the core, in [`plugins/`](plugins/README.md). A plugin is
+compiled into the server and the agent only when you enable it; a fresh clone runs the core
+alone.
+
+| Plugin | What it adds |
+|---|---|
+| [`exam`](plugins/exam/README.md) | Exam mode: limit websites, programs and USB storage during an exam, and keep screenshots as evidence of violations |
+
+```bash
+builder-infra/scripts/plugin.sh list
+builder-infra/scripts/plugin.sh enable exam
+builder-infra/scripts/plugin.sh disable exam
+```
+
+Writing your own is described in [plugins/README.md](plugins/README.md): a server half, an
+agent half and a console half, each behind a small contract.
+
 ## Repository layout
 
 ```text
@@ -284,13 +304,16 @@ walkthrough, including building the first image, is in [docs/INSTALL.md](docs/IN
 │   ├── internal/vm/          libvirt wrapper for the golden master VM
 │   ├── internal/wol/         Wake-on-LAN sender
 │   ├── internal/msi/         Per-site agent installer (MSI) builder
+│   ├── plugin/               Contract between the server and optional plugins
 │   ├── migrations/           PostgreSQL schema, applied automatically at start
 │   └── tools/ntfs-unwof/     Helper that expands CompactOS (WOF) files before capture
 ├── agent/                    Windows agent (Go)
 │   ├── cmd/swim-agent/       Service entry point
 │   ├── internal/agent/       Enrollment, command loop, reimage, pre-staging, policy, remote session and tunnel
+│   ├── plugin/               Contract between the agent and optional plugins
 │   └── install/              install.ps1 and Windows trust policy script
 ├── pe/cmd/swim-pe/           WinPE worker: partition, apply image, inject drivers and agent
+├── plugins/                  Optional features, linked in only when enabled (exam mode)
 ├── pkg/
 │   ├── manifest/             Signed command and job manifest formats shared by server and agent
 │   └── wof/                  CompactOS (WOF) decompression

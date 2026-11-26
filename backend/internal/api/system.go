@@ -74,7 +74,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		checks["database"], status = "down: "+err.Error(), "down"
 	} else {
 		var v string
-		_ = s.pool.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&v)
+		_ = s.pool.QueryRow(ctx, `SELECT max(version) FROM schema_migrations WHERE version ~ '^[0-9]'`).Scan(&v)
 		checks["database"] = "ok (schema " + v + ")"
 	}
 	if d, err := statDisk(s.cfg.StorageDir); err != nil {

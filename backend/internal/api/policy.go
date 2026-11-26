@@ -31,6 +31,10 @@ import (
 
 const minPolicyAgent = "0.5.18"
 
+// minSignOutAgent: first agent that reports who is still signed in with rights from before the
+// lock (inventory policy.install_lock.pending_sign_out) and can sign them out (sign_out_stale).
+const minSignOutAgent = "0.5.28"
+
 // reimageAdmin is the local admin account SWIM created at the machine's last install;
 // it stays an administrator under the install lock.
 func (s *Server) reimageAdmin(ctx context.Context, hostID string) string {
@@ -40,8 +44,15 @@ func (s *Server) reimageAdmin(ctx context.Context, hostID string) string {
 	return name
 }
 
-func (s *Server) policyArgs(ctx context.Context, hostID string, lock bool) json.RawMessage {
+// lockSignOutS: how long users the lock demoted get to save their work before they are signed
+// out, when an admin turns the lock on. The automatic re-send never signs anybody out.
+const lockSignOutS = 60
+
+func (s *Server) policyArgs(ctx context.Context, hostID string, lock bool, signOutS int) json.RawMessage {
 	a := manifest.SetPolicyArgs{InstallLock: lock}
+	if lock {
+		a.SignOutS = signOutS
+	}
 	if n := s.reimageAdmin(ctx, hostID); n != "" {
 		a.Keep = []string{n}
 	}
@@ -53,7 +64,7 @@ func (s *Server) policyArgs(ctx context.Context, hostID string, lock bool) json.
 // ("" when the agent is too old — it updates itself and the heartbeat sends it then).
 func (s *Server) setHostPolicy(r *http.Request, hostID string, lock bool, batch *string) (string, error) {
 	actor := "user:" + adminFrom(r).Name
-	p, ce := s.planCommand(r.Context(), hostID, "set_policy", s.policyArgs(r.Context(), hostID, lock), "", actor)
+	p, ce := s.planCommand(r.Context(), hostID, "set_policy", s.policyArgs(r.Context(), hostID, lock, lockSignOutS), "", actor)
 	var cmdID string
 	err := s.inTx(r.Context(), func(tx pgx.Tx) (audit.Entry, error) {
 		tag, err := tx.Exec(r.Context(), `UPDATE hosts SET policy = policy || jsonb_build_object('install_lock', $2::boolean)
@@ -207,7 +218,7 @@ func (s *Server) reconcilePolicy(ctx context.Context, hostID, agentVer string) {
 		return
 	}
 	const actor = "system:policy"
-	p, ce := s.planCommand(ctx, hostID, "set_policy", s.policyArgs(ctx, hostID, *desired), "", actor)
+	p, ce := s.planCommand(ctx, hostID, "set_policy", s.policyArgs(ctx, hostID, *desired, 0), "", actor)
 	if ce != nil {
 		return
 	}

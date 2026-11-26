@@ -173,6 +173,7 @@ func (s *Server) Run(ctx context.Context) {
 		defer t.Stop()
 		for {
 			s.pruneAudit(ctx)
+			s.pluginHourly(ctx)
 			select {
 			case <-ctx.Done():
 				return

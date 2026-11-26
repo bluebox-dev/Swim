@@ -30,3 +30,8 @@ node_modules/
 # ── site-specific nginx files (public name, trusted proxies) ──
 builder-infra/nginx/public-host.conf
 builder-infra/nginx/*.local.inc
+
+# ── plugins: which ones are linked in is a choice of each installation ──
+plugins/enabled
+backend/cmd/server/plugins_gen.go
+agent/cmd/swim-agent/plugins_gen.go

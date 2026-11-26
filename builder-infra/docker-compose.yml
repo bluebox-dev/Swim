@@ -50,6 +50,7 @@ services:
       - /var/run/libvirt:/var/run/libvirt
       - ${SWIM_DATA:-/srv/swim}/run:/run/swim   # waker.sock (Wake-on-LAN)
       - ${SWIM_DATA:-/srv/swim}/audit-archive:/audit-archive   # archived activity log (not served by nginx)
+      - ${SWIM_DATA:-/srv/swim}/plugins:/plugin-data   # files of optional plugins, one folder each (not served by nginx)
     networks: [internal]
 
   # Wake-on-LAN sender: the only thing on the host network, so its broadcasts reach the

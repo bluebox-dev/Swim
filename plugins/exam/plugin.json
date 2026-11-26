@@ -1,0 +1,9 @@
+{
+  "name": "exam",
+  "title": "Exam mode",
+  "version": "1.0.0",
+  "description": "Limits websites and programs during an exam and keeps screenshots as evidence.",
+  "min_agent": "0.5.39",
+  "tables": ["exam_events", "exam_hosts", "exam_profiles"],
+  "active_check": "SELECT count(*) FROM exam_hosts e JOIN hosts h ON h.id=e.host_id WHERE e.enabled AND h.retired_at IS NULL"
+}

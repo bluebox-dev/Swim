@@ -45,6 +45,9 @@ var CommandTypes = map[string]string{
 	"remote_session": "change",
 	// install lock: only SWIM (SYSTEM) can install software (agent ≥ 0.5.18)
 	"set_policy": "change",
+	// signs out the accounts the install lock demoted that are still signed in from before it;
+	// their unsaved work is lost (agent ≥ 0.5.28)
+	"sign_out_stale": "change",
 	// keep an install image stored on the machine ahead of time (agent ≥ 0.5.19)
 	"prestage_image": "change",
 	// re-try the restart into SWIM WinPE of a job whose machine came back into Windows (agent ≥ 0.5.21)
@@ -68,6 +71,10 @@ type RemoteSessionArgs struct {
 type SetPolicyArgs struct {
 	InstallLock bool     `json:"install_lock"`
 	Keep        []string `json:"keep,omitempty"` // admin accounts that stay administrators (the reimage admin)
+	// SignOutS > 0: accounts the lock just demoted that are still signed in are told to save
+	// their work and are signed out after this many seconds, so the lock takes effect without
+	// anyone walking to the machine (agent ≥ 0.5.30). 0 = leave them signed in.
+	SignOutS int `json:"sign_out_s,omitempty"`
 }
 
 // PrestageArgs is the "prestage_image" command; an empty Image clears it.

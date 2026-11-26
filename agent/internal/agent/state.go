@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-const Version = "0.5.27"
+const Version = "0.5.39"
 
 // State is persisted to <DataDir>/state.json. Secrets are sealed with
 // Protect (DPAPI on Windows) and stored base64-encoded.

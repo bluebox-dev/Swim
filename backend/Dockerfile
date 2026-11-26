@@ -5,6 +5,11 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY pkg ./pkg
 COPY backend ./backend
+# optional plugins: compiled into the server only when backend/cmd/server/plugins_gen.go
+# (written by builder-infra/scripts/plugin.sh) imports them; agent/ is here because the
+# plugins' agent halves are vetted and tested with everything else
+COPY agent ./agent
+COPY plugins ./plugins
 RUN go vet ./... && go test ./... && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/swim-server ./backend/cmd/server
 
