@@ -1,0 +1,806 @@
+<title>SWIM Blueprint Review</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: sticky section rail on the left, review sheet on the right — each section = diagram + checklist */
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --surface-2: #eef2f6;
+  --ink: #16202a;
+  --muted: #5a6673;
+  --line: #dbe1e7;
+  --accent: #1d5ca8;
+  --accent-soft: #e2ecf8;
+  --ok: #1d7a4b;
+  --ok-soft: #dcf2e5;
+  --warn: #b0560a;
+  --warn-soft: #fbead7;
+  --ask: #6a3fc7;
+  --ask-soft: #ece4fb;
+  --danger: #bf3e12;
+  --f-body: "IBM Plex Sans Thai", "Noto Sans Thai", "Leelawadee UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --r: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1318; --surface: #151c23; --surface-2: #1b242d; --ink: #e5eaef; --muted: #96a2ae;
+    --line: #27323d; --accent: #73a9ec; --accent-soft: #1a2a3d; --ok: #55c98d; --ok-soft: #15301f;
+    --warn: #f0a24c; --warn-soft: #36260f; --ask: #b59bf4; --ask-soft: #271e3d; --danger: #f08a5d;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1318; --surface: #151c23; --surface-2: #1b242d; --ink: #e5eaef; --muted: #96a2ae;
+  --line: #27323d; --accent: #73a9ec; --accent-soft: #1a2a3d; --ok: #55c98d; --ok-soft: #15301f;
+  --warn: #f0a24c; --warn-soft: #36260f; --ask: #b59bf4; --ask-soft: #271e3d; --danger: #f08a5d;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 24px 64px;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+h1, h2, h3 { text-wrap: balance; margin: 0; line-height: 1.3; }
+code, .mono { font-family: var(--f-mono); font-size: 0.86em; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.wrap { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 32px; }
+
+/* ── Header ── */
+.top { grid-column: 1 / -1; display: grid; gap: 16px; }
+.eyebrow { font-family: var(--f-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.top h1 { font-size: clamp(26px, 4vw, 34px); font-weight: 700; }
+.top p { margin: 0; color: var(--muted); max-width: 70ch; }
+.stats { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: baseline; font-variant-numeric: tabular-nums; }
+.stat b { font-size: 22px; font-weight: 600; margin-right: 4px; }
+.stat span { color: var(--muted); font-size: 13px; }
+.stat.ok b { color: var(--ok); } .stat.warn b { color: var(--warn); } .stat.ask b { color: var(--ask); }
+.bar { height: 8px; border-radius: 99px; background: var(--surface-2); display: flex; overflow: hidden; border: 1px solid var(--line); }
+.bar i { display: block; height: 100%; transition: width .3s; }
+.bar .b-ok { background: var(--ok); } .bar .b-warn { background: var(--warn); } .bar .b-ask { background: var(--ask); } .bar .b-ans { background: var(--accent); }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chip { border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 4px 12px; font-size: 13px; }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.spacer { flex: 1; }
+.btn { border: 1px solid var(--accent); background: var(--accent); color: var(--bg); border-radius: var(--r); padding: 6px 14px; font-size: 14px; font-weight: 500; }
+.save { font-size: 12.5px; color: var(--muted); font-family: var(--f-mono); }
+.save.err { color: var(--danger); }
+
+/* ── Rail ── */
+.rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); align-self: start; display: grid; gap: 2px; }
+.rail a { display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px; border-radius: 6px; color: var(--ink); text-decoration: none; font-size: 14px; }
+.rail a:hover { background: var(--surface-2); }
+.rail a .n { font-family: var(--f-mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rail a.done .n { color: var(--ok); }
+.rail a.flag .n { color: var(--warn); }
+
+/* ── Sections ── */
+main { display: grid; gap: 40px; min-width: 0; }
+section { display: grid; gap: 16px; scroll-margin-top: 16px; min-width: 0; }
+.sec-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.sec-head h2 { font-size: 21px; font-weight: 600; }
+.sec-head .ref { font-family: var(--f-mono); font-size: 12px; color: var(--muted); }
+.sec-lead { margin: 0; color: var(--muted); max-width: 72ch; }
+.diagram { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; overflow-x: auto; }
+.diagram pre.mermaid { margin: 0; background: transparent; text-align: center; font-family: var(--f-body); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--muted); }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; border: 1px solid currentColor; }
+.legend .l-pre::before { background: #e3edf9; color: #1d5ca8; }
+.legend .l-post::before { background: #fde6da; color: #bf3e12; }
+.legend .l-good::before { background: #dcf2e5; color: #1d7a4b; }
+
+/* ── Phases ── */
+.phases { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.phase { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; display: grid; gap: 4px; align-content: start; }
+.phase .pn { font-family: var(--f-mono); font-size: 12px; color: var(--accent); font-weight: 600; }
+.phase b { font-size: 14px; font-weight: 600; }
+.phase small { color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+
+/* ── Items ── */
+.items { display: grid; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); overflow: hidden; }
+.item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; padding: 12px 14px; border-top: 1px solid var(--line); position: relative; }
+.item:first-child { border-top: 0; }
+.item::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: transparent; }
+.item[data-status="ok"]::before { background: var(--ok); }
+.item[data-status="change"]::before { background: var(--warn); }
+.item[data-status="question"]::before { background: var(--ask); }
+.item[data-status="answered"]::before { background: var(--accent); }
+.item[hidden] { display: none !important; }
+.ihead { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; min-width: 0; }
+.iid { font-family: var(--f-mono); font-size: 11.5px; color: var(--muted); padding-top: 3px; white-space: nowrap; }
+.ititle { font-weight: 600; }
+.idesc { grid-column: 2; color: var(--muted); font-size: 14px; }
+.imeta { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.iref { font-family: var(--f-mono); font-size: 11.5px; color: var(--muted); }
+.ival { font-family: var(--f-mono); font-size: 12.5px; background: var(--accent-soft); color: var(--accent); border-radius: 4px; padding: 1px 8px; }
+.ictl { display: flex; gap: 6px; align-items: start; flex-wrap: wrap; justify-content: flex-end; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; background: var(--surface); padding: 4px 10px; font-size: 13px; border-left: 1px solid var(--line); white-space: nowrap; }
+.seg button:first-child { border-left: 0; }
+.seg button[data-v="ok"][aria-pressed="true"] { background: var(--ok-soft); color: var(--ok); font-weight: 600; }
+.seg button[data-v="change"][aria-pressed="true"] { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+.seg button[data-v="question"][aria-pressed="true"] { background: var(--ask-soft); color: var(--ask); font-weight: 600; }
+.notebtn { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 4px 10px; font-size: 13px; color: var(--muted); }
+.notebtn.has { color: var(--accent); border-color: var(--accent); }
+.item textarea { grid-column: 1 / -1; width: 100%; min-height: 64px; resize: vertical; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; background: var(--surface-2); color: var(--ink); font: inherit; font-size: 14px; }
+.empty { padding: 14px; color: var(--muted); font-size: 14px; }
+.ro-note { font-size: 13px; color: var(--warn); }
+#copyFallback { width: 100%; min-height: 160px; font-family: var(--f-mono); font-size: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); padding: 8px; }
+
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .rail { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; display: flex; overflow-x: auto; gap: 4px; background: var(--bg); padding-block: 8px; border-bottom: 1px solid var(--line); }
+  .rail a { flex: none; border: 1px solid var(--line); background: var(--surface); }
+  .phases { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .item { grid-template-columns: minmax(0, 1fr); }
+  .ictl { justify-content: flex-start; }
+}
+@media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow">SWIM · Staged Windows Image Manager · Spec v0.1</div>
+    <h1>ตรวจโครงสร้างระบบก่อนลงมือ</h1>
+    <p>แต่ละหมวดมีแผนภาพการทำงานและรายการที่ต้องตรวจ กด <b>เห็นด้วย</b> / <b>ขอแก้</b> / <b>สงสัย</b> แล้วเขียนโน้ตได้ทุกข้อ ระบบบันทึกให้อัตโนมัติ และ Claude อ่านผลรีวิวนี้ไปแก้สเปคได้โดยตรง</p>
+    <div class="stats" aria-live="polite">
+      <div class="stat"><b id="sDone">0</b><span id="sTotal">/ 0 ตรวจแล้ว</span></div>
+      <div class="stat ok"><b id="sOk">0</b><span>เห็นด้วย</span></div>
+      <div class="stat warn"><b id="sChange">0</b><span>ขอแก้</span></div>
+      <div class="stat ask"><b id="sAsk">0</b><span>สงสัย</span></div>
+      <div class="stat"><b id="sAns">0</b><span id="sAnsT">/ 0 คำถามที่ตอบแล้ว</span></div>
+    </div>
+    <div class="bar" aria-hidden="true"><i class="b-ok" id="bOk"></i><i class="b-warn" id="bChange"></i><i class="b-ask" id="bAsk"></i><i class="b-ans" id="bAns"></i></div>
+    <div class="toolbar">
+      <button class="chip" data-filter="all" aria-pressed="true">ทั้งหมด</button>
+      <button class="chip" data-filter="todo" aria-pressed="false">ยังไม่ตรวจ</button>
+      <button class="chip" data-filter="change" aria-pressed="false">ขอแก้</button>
+      <button class="chip" data-filter="question" aria-pressed="false">สงสัย</button>
+      <button class="chip" data-filter="noted" aria-pressed="false">มีโน้ต</button>
+      <span class="spacer"></span>
+      <span class="save" id="saveState">กำลังเชื่อมต่อที่บันทึก…</span>
+      <button class="btn" id="copyBtn">คัดลอกสรุปผลรีวิว</button>
+    </div>
+    <textarea id="copyFallback" hidden readonly aria-label="สรุปผลรีวิว"></textarea>
+  </header>
+
+  <nav class="rail" id="rail" aria-label="หมวด"></nav>
+
+  <main id="main">
+
+    <section id="arch" data-title="ภาพรวมระบบ">
+      <div class="sec-head"><h2>ภาพรวมระบบ</h2><span class="ref">01-architecture.md</span></div>
+      <p class="sec-lead">Server บน Ubuntu ทำหน้าที่สร้าง ทดสอบ และแจก image ส่วนเครื่องลูกมี Agent ดึงงานเอง พักไฟล์บน S: แล้วส่งต่อให้ WinPE ติดตั้ง</p>
+      <div class="diagram"><pre class="mermaid">
+flowchart LR
+  subgraph SRV["SWIM Server · Ubuntu 24.04 · bare metal"]
+    direction TB
+    NGX["nginx · HTTPS"] --> FE["Web Dashboard"]
+    NGX --> BE["backend · Go"]
+    BE --> PG[("PostgreSQL")]
+    BE --> KVM["KVM / libvirt"]
+    KVM --> GM["VM Golden Master"]
+    KVM --> TR["VM Test Runner ×2"]
+    KVM --> UT["VM Windows Utility<br/>ADK · DISM · djoin"]
+    NGX --> GUAC["guacd → VNC"]
+    NGX --> STO[("storage<br/>WIM · WinPE · Drivers")]
+  end
+  subgraph PC["เครื่องลูก Windows"]
+    direction TB
+    SVC["swim-svc<br/>ตัวคุม + อัปเดต"] --> AG["swim-agent"]
+    AG --> S[("S: Staging ถาวร")]
+    AG --> BCD["BCD bootsequence"]
+    BCD --> PE["WinPE · swim-pe"]
+    PE --> NEW["Windows ใหม่"]
+  end
+  AG -->|"HTTPS + mTLS ดึงงานเอง"| NGX
+  CACHE["Site cache ต่อสาขา"] -.-> AG
+</pre></div>
+      <div class="items" data-section="arch"></div>
+    </section>
+
+    <section id="image" data-title="Image Pipeline">
+      <div class="sec-head"><h2>Image Pipeline</h2><span class="ref">02-image-pipeline.md</span></div>
+      <p class="sec-lead">image หนึ่งรุ่นเดินจาก build ไปทดสอบอัตโนมัติบน VM แล้วรออนุมัติ ก่อนจะ published ได้ทีละ 1 รุ่นต่อ channel รุ่นก่อนหน้ากลายเป็น N-1 ไว้ rollback</p>
+      <div class="diagram"><pre class="mermaid">
+flowchart LR
+  B["building"] -->|"capture ok"| T["testing"]
+  T -->|"T-01 ถึง T-09 ผ่าน"| P["pending"]
+  P -->|"Approver ไม่ใช่คนเดียวกับ Builder"| PUB["published<br/>1 ต่อ channel"]
+  PUB -->|"รุ่นใหม่ publish"| SUP["superseded<br/>= N-1"]
+  SUP -->|"retention"| AR["archived"]
+  B -->|"fail"| F["failed"]
+  T -->|"fail"| TF["test_failed"]
+  P -->|"reject"| RJ["rejected"]
+  PUB -->|"fleet rollback"| WD["withdrawn"]
+  classDef bad fill:#fde6da,stroke:#bf3e12,color:#6b1f06
+  classDef good fill:#dcf2e5,stroke:#1d7a4b,color:#0f3d25
+  class F,TF,RJ,WD bad
+  class PUB,SUP good
+</pre></div>
+      <div class="items" data-section="image"></div>
+    </section>
+
+    <section id="agent" data-title="Agent บนเครื่องลูก">
+      <div class="sec-head"><h2>Agent บนเครื่องลูก</h2><span class="ref">03-agent.md</span></div>
+      <p class="sec-lead">งานยาวแยกจากการสื่อสาร เครื่องจึงตอบ Server ได้เสมอแม้กำลังโหลดไฟล์ใหญ่ ทุกเหตุการณ์เข้าคิว outbox ก่อนส่ง เน็ตหลุดก็ไม่หาย</p>
+      <div class="diagram"><pre class="mermaid">
+flowchart TB
+  SVC["swim-svc · Windows Service<br/>เฝ้า agent · self-update · rollback"] --> CTL
+  subgraph AG["swim-agent"]
+    CTL["control loop<br/>heartbeat 30s + long-poll"]
+    WRK["worker<br/>staging · download · shrink"]
+    OUT[("outbox · SQLite")]
+    WDG["watchdog<br/>timeout ต่อขั้น"]
+    NET["netcond<br/>metered · VPN · site"]
+    IPC["named pipe<br/>Admins เท่านั้น"]
+  end
+  WRK --> OUT
+  OUT --> CTL
+  WDG -.-> WRK
+  NET -.-> WRK
+  CLI["swim CLI ของช่าง"] --> IPC
+  CTL <-->|"mTLS"| SRV["SWIM Server"]
+  WRK --> S[("S: staging")]
+</pre></div>
+      <div class="items" data-section="agent"></div>
+    </section>
+
+    <section id="update" data-title="อัปเดต Agent อัตโนมัติ">
+      <div class="sec-head"><h2>อัปเดต Agent อัตโนมัติ</h2><span class="ref">04-agent-updates.md</span></div>
+      <p class="sec-lead">Agent ทุกเครื่องรับแพตช์เองต่อเนื่อง เวอร์ชันใหม่ต้องพิสูจน์ตัวเองใน 10 นาที ไม่ผ่านจะกลับเวอร์ชันเดิมเอง และการปล่อยหยุดเองได้เมื่อพบปัญหา</p>
+      <div class="diagram"><pre class="mermaid">
+flowchart TB
+  HB["heartbeat ได้ agent_target"] --> CHK{"อยู่ในช่วงที่อัปเดตได้?"}
+  CHK -->|"ไม่ได้ · มี job ช่วง handoff"| DEF["เลื่อน · update_deferred"]
+  CHK -->|"ได้"| DL["โหลด bundle ~15 MB"]
+  DL --> V["ตรวจ 3 ชั้น<br/>SHA256 · Ed25519 · Authenticode"]
+  V -->|"ไม่ผ่าน"| REJ["ทิ้ง · รายงาน"]
+  V -->|"ผ่าน"| DR["svc สั่ง drain agent เก่า"]
+  DR --> TRIAL["สตาร์ตเวอร์ชันใหม่ในโหมด TRIAL"]
+  TRIAL --> ST{"self-test + heartbeat<br/>ภายใน 10 นาที"}
+  ST -->|"ผ่าน"| COMMIT["COMMIT<br/>Active = ใหม่ · Previous = เดิม"]
+  ST -->|"crash 3 ครั้ง / ไม่ผ่าน"| RB["ROLLBACK เวอร์ชันเดิม<br/>+ BlockedVersions"]
+  RESC["SWIMRescue · Scheduled Task"] -.->|"svc พัง → ชี้กลับ svc เดิม"| DR
+  classDef bad fill:#fde6da,stroke:#bf3e12,color:#6b1f06
+  classDef good fill:#dcf2e5,stroke:#1d7a4b,color:#0f3d25
+  class RB,REJ bad
+  class COMMIT good
+</pre></div>
+      <div class="items" data-section="update"></div>
+    </section>
+
+    <section id="deploy" data-title="ขั้นตอนล้างเครื่อง">
+      <div class="sec-head"><h2>ขั้นตอนล้างเครื่อง</h2><span class="ref">05-deployment-flow.md §1–4</span></div>
+      <p class="sec-lead">ทุกขั้นก่อน format C: ย้อนกลับเป็น Windows เดิมได้เอง หลังจากนั้นทำซ้ำได้เองจนสำเร็จหรือตกไปใช้ image N-1</p>
+      <div class="diagram"><pre class="mermaid">
+flowchart LR
+  Q["queued"] --> PF["preflight"] --> STG["staging"] --> SD["staged"] --> W["waiting"] --> HO["handoff"] --> PV["pe_verify"]
+  PV ==>|"PONR · format C:"| AP["applying"]
+  AP --> FB["first_boot"] --> HC["health_check"] --> OK["completed"]
+  PF -.->|"BLOCK"| BL["blocked"]
+  W -.->|"ยกเลิก / kill switch"| CX["cancelled"]
+  HO -.-> AB["aborted<br/>กลับ Windows เดิม"]
+  PV -.-> AB
+  AP -.->|"ล้ม 3 ครั้ง"| FA["fallback_apply N-1"]
+  HC -.->|"supervisor ตัดสินว่าล้ม"| FA
+  FA --> RBK["rolled_back"]
+  FA -.-> FL["failed · ต้องใช้ช่าง"]
+  classDef pre fill:#e3edf9,stroke:#1d5ca8,color:#0f2f57
+  classDef post fill:#fde6da,stroke:#bf3e12,color:#6b1f06
+  classDef good fill:#dcf2e5,stroke:#1d7a4b,color:#0f3d25
+  class Q,PF,STG,SD,W,HO,PV,BL,CX,AB pre
+  class AP,FB,HC,FA,FL post
+  class OK,RBK good
+</pre></div>
+      <div class="legend"><span class="l-pre">ก่อน PONR · ย้อนกลับได้</span><span class="l-post">หลัง PONR · ทำซ้ำได้</span><span class="l-good">จบแบบใช้งานได้</span></div>
+      <div class="items" data-section="deploy"></div>
+    </section>
+
+    <section id="supervisor" data-title="Boot supervisor และ Rollback">
+      <div class="sec-head"><h2>Boot supervisor และ Rollback</h2><span class="ref">05-deployment-flow.md §5–6</span></div>
+      <p class="sec-lead">หลัง apply แล้ว WinPE ยังเป็นค่าบูตหลัก ถ้า Windows ใหม่พังจะตกกลับ WinPE เอง แล้วตัดสินว่าจะลองใหม่หรือลง N-1</p>
+      <div class="diagram"><pre class="mermaid">
+flowchart TB
+  A["apply เสร็จ<br/>default = WinPE · bootsequence = Windows ใหม่"] --> B["บูต Windows ใหม่"]
+  B -->|"health ผ่าน"| C["COMMIT<br/>default = Windows · ลบ entry PE"]
+  B -->|"BSOD / ค้าง / Setup รีบูต"| D["ตกกลับ WinPE"]
+  D --> E{"อ่าน ImageState<br/>แบบ offline"}
+  E -->|"Setup ยังเดินอยู่"| F["boot_attempts +1"]
+  E -->|"COMPLETE แต่ health ไม่ผ่าน"| F
+  F -->|"ไม่เกิน 3"| B
+  F -->|"เกิน 3"| G["fallback_apply N-1"]
+  G --> H["rolled_back · ใช้งานได้"]
+  G -.->|"N-1 ก็ล้ม / ไม่มี N-1"| I["failed<br/>หน้าจอ job id + QR"]
+  classDef bad fill:#fde6da,stroke:#bf3e12,color:#6b1f06
+  classDef good fill:#dcf2e5,stroke:#1d7a4b,color:#0f3d25
+  class I bad
+  class C,H good
+</pre></div>
+      <div class="items" data-section="supervisor"></div>
+    </section>
+
+    <section id="fleet" data-title="ควบคุมการปล่อยทั้งองค์กร">
+      <div class="sec-head"><h2>ควบคุมการปล่อยทั้งองค์กร</h2><span class="ref">07-fleet-safety.md</span></div>
+      <p class="sec-lead">ปล่อย image เป็นระลอก มีด่านตรวจระหว่างระลอก ระบบหยุดเองเมื่อล้มเกินเกณฑ์ และมีปุ่มหยุดทั้งระบบ</p>
+      <div class="diagram"><pre class="mermaid">
+flowchart LR
+  C["canary<br/>3 เครื่องต่อรุ่น"] -->|"ผ่าน 100% · 24 ชม."| P["pilot 10%"]
+  P -->|"สำเร็จ 95% ขึ้นไป · 24 ชม."| H["50%"]
+  H -->|"สำเร็จ 97% ขึ้นไป"| F["100%"]
+  BR["circuit breaker<br/>ล้ม 2 ใน 10 หรือเกิน 5%"] -.->|"pause"| P
+  BR -.-> H
+  BR -.-> F
+  KS["kill switch<br/>global · channel · site · rollout"] -.->|"หยุดทุกงานที่ยังไม่ถึง PONR"| C
+  classDef bad fill:#fde6da,stroke:#bf3e12,color:#6b1f06
+  class BR,KS bad
+</pre></div>
+      <div class="items" data-section="fleet"></div>
+    </section>
+
+    <section id="security" data-title="ความปลอดภัย">
+      <div class="sec-head"><h2>ความปลอดภัย</h2><span class="ref">08-security.md</span></div>
+      <p class="sec-lead">SWIM ล้างเครื่องและรันโค้ดระดับ SYSTEM ได้ทุกเครื่อง จึงต้องดูแลระดับเดียวกับ Domain Controller</p>
+      <div class="items" data-section="security"></div>
+    </section>
+
+    <section id="ops" data-title="การดูแลระบบ">
+      <div class="sec-head"><h2>การดูแลระบบ</h2><span class="ref">09-operations.md</span></div>
+      <p class="sec-lead">log, การแจ้งเตือน, backup และช่องทางสำรองเมื่อระบบอัตโนมัติช่วยไม่ได้</p>
+      <div class="items" data-section="ops"></div>
+    </section>
+
+    <section id="roadmap" data-title="แผนพัฒนา">
+      <div class="sec-head"><h2>แผนพัฒนา</h2><span class="ref">12-roadmap.md</span></div>
+      <p class="sec-lead">6 เฟส แต่ละเฟสมีเกณฑ์ผ่านชัดเจนก่อนไปเฟสถัดไป</p>
+      <div class="phases">
+        <div class="phase"><span class="pn">เฟส 0</span><b>ตัดสินใจ + Lab</b><small>เลือกเครื่อง 3 รุ่น ตั้ง Server + VM ยืนยัน D-01 ถึง D-19</small></div>
+        <div class="phase"><span class="pn">เฟส 1</span><b>PoC สคริปต์</b><small>20 รอบติดไม่พลาด × 3 รุ่น + chaos test 8 ข้อ</small></div>
+        <div class="phase"><span class="pn">เฟส 2</span><b>Agent + swim-pe (Go)</b><small>รวม self-update และ auto-rollback</small></div>
+        <div class="phase"><span class="pn">เฟส 3</span><b>Control Plane</b><small>เว็บสั่งงานครบวงจร pentest + pilot 20–50 เครื่อง</small></div>
+        <div class="phase"><span class="pn">เฟส 4</span><b>Scale</b><small>driver, delta, cache, ETA, DR — site แรกสำเร็จ 98%</small></div>
+        <div class="phase"><span class="pn">เฟส 5</span><b>Web Builder</b><small>Guacamole + ปุ่ม Build + ทดสอบ image อัตโนมัติ</small></div>
+      </div>
+      <div class="items" data-section="roadmap"></div>
+    </section>
+
+    <section id="defaults" data-title="ค่าตั้งต้นที่ต้องยืนยัน">
+      <div class="sec-head"><h2>ค่าตั้งต้นที่ต้องยืนยัน</h2><span class="ref">หลายไฟล์</span></div>
+      <p class="sec-lead">ตัวเลขเหล่านี้ Claude ตั้งเป็นค่าเริ่มต้นไว้ ถ้าไม่ตรงกับองค์กร กด "ขอแก้" แล้วเขียนค่าที่ต้องการในโน้ต</p>
+      <div class="items" data-section="defaults"></div>
+    </section>
+
+    <section id="questions" data-title="คำถามถึงองค์กร">
+      <div class="sec-head"><h2>คำถามถึงองค์กร</h2><span class="ref">ต้องตอบก่อนเฟส 0 จบ</span></div>
+      <p class="sec-lead">สเปคยังต้องการข้อมูลเหล่านี้ พิมพ์คำตอบในช่องได้เลย</p>
+      <div class="items" data-section="questions"></div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // [id, หัวข้อ, รายละเอียด, อ้างอิง, ค่า(ไม่บังคับ)]
+  var DATA = {
+    arch: [
+      ["ARC-1", "Server = Ubuntu 24.04 LTS บนเครื่องจริง + KVM/libvirt", "ห้ามรัน Ubuntu เป็น VM ซ้อน (nested virtualization) ใน production", "D-01 · 01 §3"],
+      ["ARC-2", "มี Windows Utility VM บน Server", "ใช้สร้าง WinPE (ADK), service WIM (DISM) และสร้างไฟล์ ODJ (djoin) ซึ่งทำบน Linux ไม่ได้", "D-02 · 01 §3"],
+      ["ARC-3", "ส่ง WIM ไปเครื่องลูก ไม่ใช่ ISO", "WIM เก็บเป็นไฟล์ ใส่ได้ทุกขนาดดิสก์ เครื่องปลายทางแบ่งพาร์ทิชันเองตาม Disk Profile", "D-03"],
+      ["ARC-4", "Engine A (setup.exe /auto clean) สำหรับ PoC, Engine B (WinPE + DISM) สำหรับใช้งานจริง", "Agent ออกแบบให้สลับ engine ได้ ส่วนดาวน์โหลด/ตรวจไฟล์/รายงานใช้ร่วมกัน", "D-04 · 05 §7"],
+      ["ARC-5", "ใช้ Go ทั้ง backend, agent, swim-pe + PostgreSQL + React", "แชร์ type ของ manifest และ state machine ร่วมกันใน pkg/", "D-13 · 01 §5"],
+      ["ARC-6", "สเปก Server ขั้นต่ำ", "CPU 8 cores (VT-x), RAM 32 GB, SSD ข้อมูล 1 TB — แนะนำ 16 cores / 64 GB / 2 TB NVMe", "01 §3"],
+      ["ARC-7", "Agent ดึงงานเองทั้งหมด เครื่องลูกไม่เปิดพอร์ตรับ", "HTTPS + mTLS, long-poll + heartbeat, WinPE ไม่ต้องพึ่งเน็ต", "01 §4"]
+    ],
+    image: [
+      ["IMG-1", "กติกา Golden Master", "ห้ามมี EDR/SCCM/Intune ที่สร้าง ID ตอนติดตั้ง, ทำใน Audit Mode, ปิด Store auto-update, snapshot ก่อน sysprep ทุกครั้ง, ห้าม /mode:vm", "02 §3"],
+      ["IMG-2", "ขั้นตอนปุ่ม Build Image 9 ขั้น", "ตรวจพื้นที่ → snapshot → sysprep → รอปิด → capture ด้วย wimlib → chunk + hash → เซ็น → ย้อน snapshot → ทดสอบ", "02 §4"],
+      ["IMG-3", "ทดสอบ image อัตโนมัติบน Server ด้วยขั้นตอนติดตั้งจริงทั้งหมด", "Test Runner VM 2 ตัว (128/512 GB) รัน T-01 ถึง T-09 รวมเช็ก ID ซ้ำ, domain, BitLocker, rollback", "D-08 · 02 §5"],
+      ["IMG-4", "คนอนุมัติต้องไม่ใช่คน build รุ่นนั้น", "บังคับที่ระดับฐานข้อมูล", "02 §1"],
+      ["IMG-5", "1 รุ่น published ต่อ channel, แยก channel ตาม arch/edition", "เช่น win11-x64-stable, win11-arm64-stable", "02 §2"],
+      ["IMG-6", "วางแผนพื้นที่ก่อน build ทั้งฝั่ง Server และ S: ของเครื่องลูก", "เตือนที่ 80%, บล็อก build ที่ 90%, ก่อน approve แสดงจำนวนเครื่องที่ S: เล็กเกินไป", "D-10 · 02 §7"],
+      ["IMG-7", "Delta image รายเดือน + rebase ทุก 3–6 เดือน", "ใช้ wimlib --delta-from และ apply ด้วย wimlib ใน WinPE", "02 §6"],
+      ["IMG-8", "License: activate ตามเครื่อง, edition ไม่ตรงจะเตือนใน preflight", "แอปที่ต้อง activate ใหม่ผู้ใช้จัดการเอง", "D-09 · 02 §8"],
+      ["IMG-9", "WinPE build จาก ADK ล่าสุด + storage driver ทุกรุ่น (Intel VMD/RST)", "รองรับ boot chain ที่เซ็นด้วย Windows UEFI CA 2023", "02 §9"]
+    ],
+    agent: [
+      ["AGT-1", "ติดตั้ง Agent ครั้งแรกผ่าน GPO / Intune / MSI + enrollment token", "token ผูกสาขา มีวันหมดอายุและจำกัดจำนวนครั้ง", "03 §2"],
+      ["AGT-2", "ตัวตนเครื่อง: กุญแจใน TPM + client cert อายุ 90 วัน", "หลังล้างเครื่องใช้ reimage ticket แบบใช้ครั้งเดียว ได้ host_id เดิม", "03 §3"],
+      ["AGT-3", "คำสั่งตายตัว (allowlist) ไม่มี run_command ทุกเวอร์ชัน", "inventory, stage, deploy, rollback, cancel, collect_logs, resize_staging, update_agent, reboot", "D-14 · 03 §4"],
+      ["AGT-4", "สั่งจากเครื่องโดยตรงต้องเป็น Local Admin + ใช้ manifest ที่เซ็นแล้วเท่านั้น", "standing manifest อายุ 7 วัน ทำให้สั่งได้แม้ออฟไลน์ ทุกคำสั่งขึ้น audit", "03 §4"],
+      ["AGT-5", "Preflight แบบ BLOCK 8 ข้อ / WARN 3 ข้อ", "เช่น ไฟ AC, UEFI/GPT, arch, ขนาดดิสก์, storage driver, S: จุพอ, Secure Boot, kill switch", "03 §5"],
+      ["AGT-6", "S: ถาวร ซ่อนจากผู้ใช้ ต่อท้าย C:", "ต้องไม่ถูก BitLocker เข้ารหัสอัตโนมัติ ถ้ามี policy บังคับจะ BLOCK พร้อมคำแนะนำ", "D-07 · 03 §6"],
+      ["AGT-7", "โหลดเป็น chunk 64 MiB: peer → site cache → server", "resume ทีละ chunk, จำกัดแบนด์วิดท์, ลดลงครึ่งหนึ่งเมื่อผู้ใช้กำลังใช้งาน", "03 §7"],
+      ["AGT-8", "ไม่โหลด image ผ่านเน็ตคิดตามปริมาณ หรือ VPN (ค่าเริ่มต้น)", "แต่อนุญาต heartbeat และอัปเดต Agent", "03 §8"],
+      ["AGT-9", "แจ้งผู้ใช้ก่อนล้างเครื่อง พร้อมนับถอยหลังและให้เลื่อนได้", "ข้อความระบุชัดว่าข้อมูลบน C: จะหาย บันทึกการแจ้งลง audit", "D-05 · 03 §9"]
+    ],
+    update: [
+      ["UPD-1", "แยก swim-svc (ตัวคุม) กับ swim-agent ห้ามอัปเดตพร้อมกันในรอบเดียว", "มีตัวที่รู้ว่าดีคอยกู้อีกตัวเสมอ", "D-17 · 04 §2"],
+      ["UPD-2", "ตรวจ 3 ชั้นก่อนสลับเวอร์ชัน", "SHA256 + ลายเซ็น Ed25519 ของ release.json + Authenticode ของทุก .exe", "04 §3"],
+      ["UPD-3", "ทดลองใช้ 10 นาที ไม่ผ่านกลับเวอร์ชันเดิมเอง", "เวอร์ชันที่ล้มถูกใส่ BlockedVersions ไม่ลองซ้ำบนเครื่องนั้น", "04 §5"],
+      ["UPD-4", "ห้ามอัปเดตช่วง handoff ถึง health_check", "ช่วงโหลดไฟล์อัปเดตได้ แล้ว resume ต่อหลังสลับ", "04 §6"],
+      ["UPD-5", "Migration แบบ expand → contract", "เวอร์ชันใหม่ห้ามเขียนข้อมูลที่เวอร์ชันก่อนอ่านไม่ได้ เพื่อให้ rollback ได้จริง", "04 §7"],
+      ["UPD-6", "ปล่อยเป็นระลอก canary → pilot 10% → 25/50/100%", "เลือกเครื่องแบบ deterministic จาก hash(host_id + release_id)", "04 §10"],
+      ["UPD-7", "หยุดปล่อยเองเมื่อ health gate ไม่ผ่าน", "อัปเดตล้ม > 2%, เครื่องเงียบ > 0.5%, crash > 2 เท่า, job ล้มเพิ่ม > 5 จุด", "04 §10"],
+      ["UPD-8", "แพตช์ความปลอดภัย: canary 2 ชม. แล้วปล่อย 100%", "breaker ยังทำงานตามปกติ", "04 §10"],
+      ["UPD-9", "ตาข่ายกู้: SWIMRescue → GPO re-push MSI", "MSI ติดตั้งทับได้โดยไม่เสียตัวตนเดิม", "04 §9"],
+      ["UPD-10", "เครื่องออฟไลน์นาน: ต่อ cert เองได้ถึง 180 วัน เกินนั้น re-enroll", "เวอร์ชันเก่ากว่า N-2 ได้ 426 แล้วอัปเดตตรงไปเวอร์ชันล่าสุด", "04 §11"],
+      ["UPD-11", "Release pipeline: CI build + เซ็น + ทดสอบอัปเดตจาก N-1, N-2 และ rollback", "ปล่อยไป canary ต้องมีคนกดที่ไม่ใช่คน tag", "04 §13"]
+    ],
+    deploy: [
+      ["DEP-1", "state machine + state.json เป็นความจริงเดียวของทุกฝ่าย", "เขียนแบบ atomic ทุกครั้งก่อนเริ่มขั้นใหม่", "05 §1–2"],
+      ["DEP-2", "ระบุพาร์ทิชันด้วย GPT GUID เท่านั้น ห้ามใช้เลขดิสก์หรือตัวอักษรไดรฟ์", "เลขดิสก์ใน WinPE อาจไม่ตรงกับใน Windows", "05 §2"],
+      ["DEP-3", "ลำดับ handoff: ตรวจไฟล์ → suspend BitLocker → BCD ด้วย GUID คงที่ → bootsequence ครั้งเดียว", "WinPE บูตไม่ขึ้นเครื่องกลับ Windows เดิมเอง", "05 §3.3"],
+      ["DEP-4", "ก่อน format C: ตั้ง default = WinPE", "ไฟดับหลังจุดนี้เครื่องบูตกลับ WinPE แล้วทำต่อ", "05 §4.2"],
+      ["DEP-5", "โหมด refresh (ค่าเริ่มต้น) และ repartition", "repartition แตะเฉพาะพาร์ทิชันก่อน S: และต้องยืนยันว่า D: จะหาย", "05 §4.2"],
+      ["DEP-6", "apply ล้ม retry 2 ครั้ง แล้วตกไปใช้ N-1", "ทุกขั้นหลัง PONR ทำซ้ำได้", "05 §4.3"],
+      ["DEP-7", "Agent ใหม่ฉีดผ่าน registry แบบ offline (ไม่พึ่ง SetupComplete)", "เพราะ SetupComplete ไม่รันเมื่อใช้ OEM key", "05 §4.3"],
+      ["DEP-8", "หลังติดตั้ง: ODJ /reuse, Windows LAPS, BitLocker escrow", "บัญชี djoin อยู่ใน allowlist ของ policy re-use (KB5020276)", "D-15 · 05 §8"],
+      ["DEP-9", "แสดง ETA (P50/P90) และระดับความเสี่ยงก่อนกดยืนยัน", "อัตราสำเร็จ = (สำเร็จ+1)/(ทั้งหมด+2) แยกตามรุ่น/BIOS/image, HIGH กดไม่ได้", "05 §9"],
+      ["DEP-10", "timeout ต่อขั้นของ watchdog", "เช่น pe_verify 20 นาที, applying max(P90×3, 45 นาที)", "05 §10"]
+    ],
+    supervisor: [
+      ["SUP-1", "บูตแบบทดลอง: default = WinPE, bootsequence = Windows ใหม่", "Agent ใหม่ผ่าน health check ถึงจะ commit", "05 §5"],
+      ["SUP-2", "อ่าน ImageState ก่อนตัดสินว่าล้ม", "เพราะ Windows Setup รีบูตเองระหว่าง specialize/OOBE", "05 §5"],
+      ["SUP-3", "Health check บังคับ 4 ข้อ + เตือน 3 ข้อ", "re-enroll, ไม่มี BSOD, secure channel ของ domain, storage/NIC ไม่มี error · เน็ต, activation, BitLocker", "05 §5"],
+      ["SUP-4", "บูตล้มเกิน 3 รอบ → ลง N-1 อัตโนมัติ", "ผลเป็น rolled_back และส่ง log เต็มระดับ FATAL", "05 §6"],
+      ["SUP-5", "N-1 ก็ล้มหรือไม่มี → failed ค้างหน้าจอ WinPE พร้อม job id + QR", "ช่างใช้ช่องทาง USB ต่อ", "05 §6"],
+      ["SUP-6", "Rollback = ลงใหม่ด้วย image N-1 (ข้อมูลบน C: หายอีกรอบ)", "ไม่ใช่การคืนสภาพเครื่องเดิม", "D-06"]
+    ],
+    fleet: [
+      ["FLT-1", "ปล่อยเป็นระลอก: canary → 10% → 50% → 100%", "ด่านผ่าน 100% / 95% / 97% เลื่อนระลอกอัตโนมัติหรือตั้งให้กดเองได้", "07 §1"],
+      ["FLT-2", "รุ่นเครื่องที่ยังไม่เคยผ่าน canary กับ image นี้ ถูกพักไว้", "ไม่ปล่อยในระลอกถัดไปจนกว่าจะผ่าน", "07 §1"],
+      ["FLT-3", "จำกัดการทำพร้อมกัน + มี lease 2 ชม.", "นับเฉพาะช่วง handoff ถึง health_check", "07 §2"],
+      ["FLT-4", "ล้างเครื่องได้เฉพาะในช่วง maintenance window", "ถ้า ETA P90 เกินท้ายหน้าต่างจะรอรอบถัดไป", "07 §3"],
+      ["FLT-5", "Kill switch 4 ระดับ ทำงาน 5 ทาง", "heartbeat, go-token, ตรวจใน WinPE, หยุดออก manifest, งานหลัง PONR ทำต่อจนจบ", "07 §4"],
+      ["FLT-6", "ปลด kill switch ระดับ global ต้องใช้ 2 คน", "ต้องพิมพ์เหตุผลทุกครั้ง", "07 §4"],
+      ["FLT-7", "Circuit breaker หยุดเอง + kill switch อัตโนมัติเมื่อล้ม > 10 งานใน 30 นาที", "แจ้ง release_manager พร้อม error ที่พบมากสุด", "07 §5"],
+      ["FLT-8", "Fleet rollback ไป N-1 จาก cache บน S:", "เครื่องที่มี N-1 ไม่ใช้เน็ต ~25 นาทีต่อเครื่อง", "07 §6"]
+    ],
+    security: [
+      ["SEC-1", "ถือ SWIM เป็น Tier-0 เทียบเท่า Domain Controller", "threat model 8 ข้อพร้อมมาตรการ", "08 §1"],
+      ["SEC-2", "PKI: Root CA offline, Intermediate บน Server (step-ca หรือ ADCS), cert 90 วัน", "Agent pin CA ของ SWIM เท่านั้น", "08 §2"],
+      ["SEC-3", "แยกกุญแจเซ็น: release key อยู่นอก Server", "manifest key อยู่ใน signer service แยก, code signing อยู่ใน hardware token", "08 §3"],
+      ["SEC-4", "หมุนกุญแจผ่าน keyset ที่เซ็นด้วย root release key", "กุญแจรั่ว = ออก keyset ใหม่ + global kill switch", "08 §3"],
+      ["SEC-5", "RBAC 6 บทบาท + งานที่ต้อง 2 คน", "viewer, technician, image_builder, approver, release_manager, admin", "08 §4"],
+      ["SEC-6", "ODJ blob v1 พักบน S: ไม่กี่นาที (ข้อยกเว้น), v2 seal ด้วย TPM", "ใช้ครั้งเดียว อายุ 24 ชม. ล้มแล้ว reset รหัสบัญชีเครื่อง", "08 §5"],
+      ["SEC-7", "Audit log แบบเขียนเพิ่มอย่างเดียว + hash chain + ส่ง SIEM", "เก็บอย่างน้อย 1 ปี", "08 §6"],
+      ["SEC-8", "pentest ภายในก่อนขึ้น production", "และ test ปฏิเสธ manifest/keyset/downgrade ที่ถูกแก้ในทุก release", "08 §8"]
+    ],
+    ops: [
+      ["OPS-1", "สรุปผลส่งทุกงาน, log เต็มส่งเฉพาะ FATAL/ERROR, เก็บในเครื่อง 5 งาน", "log bundle รวม swim-pe, dism, Panther, BCD, ดิสก์, event log", "D-11 · 09 §1"],
+      ["OPS-2", "Server ตรวจจับเครื่องที่เงียบเองเป็น suspected_failure", "เมื่อเงียบเกิน ETA P90 × 1.5", "09 §1"],
+      ["OPS-3", "แจ้งเตือน 9 แบบผ่าน webhook", "breaker, เครื่องเงียบ, พื้นที่, cert หมดอายุ, backup ล้ม, Agent ค้างเวอร์ชัน ฯลฯ", "09 §2"],
+      ["OPS-4", "Backup: pgBackRest + rsync image ไป NAS, ซ้อม restore ทุกไตรมาส", "เป้าหมายกู้ระบบ 4 ชม.", "09 §3"],
+      ["OPS-5", "เมื่อ Server ล่ม เครื่องลูกทำงานต่อได้", "งานหลัง PONR จบเอง, outbox เก็บไว้ส่งทีหลัง", "09 §3"],
+      ["OPS-6", "ช่องทางสำรอง: ช่างลงด้วย USB แล้ว re-enroll", "SWIM USB เป็นทางเลือกในเฟส 4", "D-12 · 09 §4"],
+      ["OPS-7", "เตือนก่อน Windows หมด support 180/90/30 วัน", "90 วันก่อนหมด บล็อก rollout ใหม่ไป channel นั้น", "09 §5"],
+      ["OPS-8", "Runbook 9 ฉบับ (RB-01 ถึง RB-09)", "เครื่องค้าง, ลง USB, breaker, fleet rollback, Agent update พัง, restore, หมุนกุญแจ, รุ่นใหม่, build รายเดือน", "09 §6"]
+    ],
+    roadmap: [
+      ["RM-1", "เฟส 0: ตัดสินใจ + ตั้ง Lab", "รวมขอ policy AD (บัญชี djoin) และตกลงเรื่อง BitLocker บน S:", "12"],
+      ["RM-2", "เฟส 1 เกณฑ์ผ่าน: 20 รอบติดไม่พลาด × 3 รุ่น + chaos test C-01 ถึง C-08", "ถอดปลั๊กในทุกขั้นแล้วเครื่องต้องกู้เองได้", "12"],
+      ["RM-3", "เฟส 2 ต้องมี self-update ก่อน Agent ตัวแรกถึงมือผู้ใช้", "ทดสอบ U-01 ถึง U-08", "12"],
+      ["RM-4", "เฟส 3: Control plane + pentest + pilot 20–50 เครื่อง", "", "12"],
+      ["RM-5", "เฟส 4: driver, delta, site cache, ETA, DR", "เกณฑ์: site แรกสำเร็จ 98% และซ้อม DR ผ่าน", "12"],
+      ["RM-6", "เฟส 5: Web Builder อยู่ท้ายสุด", "ช่วงแรกแอดมิน capture เองแล้วอัปโหลดขึ้นมาได้", "12"],
+      ["RM-7", "Hardware test matrix", "รุ่น, VMD, Secure Boot, BitLocker, AC/แบต, LAN/Wi-Fi/VPN, ขนาดดิสก์, Windows ภาษาไทย/อังกฤษ", "12"]
+    ],
+    defaults: [
+      ["DEF-1", "ขนาด S:", "", "03 §6", "max(24 GB, 2×image + 2 GB)"],
+      ["DEF-2", "ดิสก์ขั้นต่ำ", "", "02 §2", "128 GB"],
+      ["DEF-3", "แจ้งผู้ใช้ก่อนล้างเครื่อง", "", "03 §9", "นับถอยหลัง 15 นาที · เลื่อนได้ 2 ครั้ง ≤ 4 ชม."],
+      ["DEF-4", "แบตเตอรี่", "", "03 §5", "ต้องเสียบไฟ AC + แบต ≥ 30%"],
+      ["DEF-5", "ทำพร้อมกัน", "", "07 §2", "ทั้งระบบ 50 · ต่อสาขา 10 · โหลดต่อสาขา 20"],
+      ["DEF-6", "ระลอก image", "", "07 §1", "canary 3/รุ่น → 10% → 50% → 100%"],
+      ["DEF-7", "เกณฑ์ breaker", "", "07 §5", "ล้ม 2 ใน 10 หรือ > 5%"],
+      ["DEF-8", "อายุ manifest", "", "06 §2", "24 ชม. · standing 7 วัน"],
+      ["DEF-9", "โหลด image ผ่าน VPN", "", "03 §8", "ไม่อนุญาต"],
+      ["DEF-10", "เป้าหมายอัปเดต Agent", "", "04 §1", "95% ใน 7 วัน · แพตช์ความปลอดภัย 48 ชม."],
+      ["DEF-11", "อายุ cert ของ Agent", "", "08 §2", "90 วัน · ต่อเองได้ถึง 180 วัน"],
+      ["DEF-12", "เก็บ log", "", "09 §1", "สรุป 2 ปี · log เต็ม 180 วัน · ในเครื่อง 5 งาน"],
+      ["DEF-13", "กู้ระบบ", "", "09 §3", "DB หายได้ ≤ 15 นาที · กู้เสร็จใน 4 ชม."],
+      ["DEF-14", "Windows Update", "", "D-19", "ใช้ระบบเดิมขององค์กร ไม่อยู่ใน SWIM"]
+    ],
+    questions: [
+      ["Q-1", "ใช้ AD on-prem, Entra ID หรือ Hybrid?", "กระทบเรื่อง ODJ, ที่เก็บ BitLocker key และ SSO", "D-15"],
+      ["Q-2", "ใช้ EDR/Antivirus ตัวไหน?", "ใส่ในกติกา Golden Master และรายการ ID ที่ระบบทดสอบต้องตรวจ", "02 §3"],
+      ["Q-3", "มี GPO, Intune หรือ SCCM สำหรับติดตั้ง Agent ครั้งแรกไหม?", "", "03 §2"],
+      ["Q-4", "มีกี่สาขา และลิงก์ระหว่างสาขาเร็วแค่ไหน?", "ใช้ตัดสินว่าต้องมี cache ต่อสาขาหรือไม่", "03 §7"],
+      ["Q-5", "เครื่อง 3 รุ่นที่มีมากที่สุดคืออะไร?", "ใช้เป็นห้องทดลองเฟส 0–1", "12"],
+      ["Q-6", "ช่องทางแจ้งเตือนของทีม: Teams, Line หรืออีเมล?", "", "09 §2"],
+      ["Q-7", "มี CA ภายใน (ADCS) อยู่แล้ว หรือให้ SWIM ตั้งของตัวเอง (step-ca)?", "", "08 §2"]
+    ]
+  };
+
+  var STATUS_LABEL = { ok: "เห็นด้วย", change: "ขอแก้", question: "สงสัย" };
+  var LS_KEY = "swim-review-v1";
+  var state = {};           // id -> {status, note}
+  var meta = {};            // id -> {section, title, kind, ref, value}
+  var order = [];
+  var filter = "all";
+  var db = null, col = null, readOnly = false;
+  var noteTimers = {}, chains = {};
+
+  // ── storage helpers ──
+  function lsLoad() { try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}") || {}; } catch (e) { return {}; } }
+  function lsSave() { try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {} }
+  function setSave(text, err) { var el = document.getElementById("saveState"); el.textContent = text; el.classList.toggle("err", !!err); }
+
+  // ── build DOM ──
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+
+  function buildItem(sec, row) {
+    var id = row[0], kind = sec === "questions" ? "q" : "item";
+    meta[id] = { section: sec, title: row[1], desc: row[2], ref: row[3], value: row[4] || "", kind: kind };
+    order.push(id);
+    var item = el("div", "item"); item.dataset.id = id;
+    var head = el("div", "ihead");
+    head.appendChild(el("span", "iid", id));
+    head.appendChild(el("div", "ititle", row[1]));
+    if (row[2]) head.appendChild(el("div", "idesc", row[2]));
+    var m = el("div", "imeta");
+    if (row[4]) m.appendChild(el("span", "ival", row[4]));
+    if (row[3]) m.appendChild(el("span", "iref", row[3]));
+    head.appendChild(m);
+    item.appendChild(head);
+
+    var ctl = el("div", "ictl");
+    if (kind === "item") {
+      var seg = el("div", "seg"); seg.setAttribute("role", "group"); seg.setAttribute("aria-label", "สถานะของ " + id);
+      ["ok", "change", "question"].forEach(function (v) {
+        var b = el("button", null, STATUS_LABEL[v]); b.type = "button"; b.dataset.v = v; b.setAttribute("aria-pressed", "false");
+        seg.appendChild(b);
+      });
+      ctl.appendChild(seg);
+      var nb = el("button", "notebtn", "โน้ต"); nb.type = "button"; nb.dataset.act = "note"; nb.setAttribute("aria-expanded", "false");
+      ctl.appendChild(nb);
+    }
+    item.appendChild(ctl);
+
+    var ta = el("textarea");
+    ta.id = "note-" + id;
+    ta.setAttribute("aria-label", "โน้ตของ " + id);
+    ta.placeholder = kind === "q" ? "พิมพ์คำตอบ…" : "เขียนสิ่งที่ต้องการแก้ หรือคำถาม…";
+    if (kind === "item") ta.hidden = true;
+    item.appendChild(ta);
+    return item;
+  }
+
+  Object.keys(DATA).forEach(function (sec) {
+    var box = document.querySelector('.items[data-section="' + sec + '"]');
+    DATA[sec].forEach(function (row) { box.appendChild(buildItem(sec, row)); });
+    box.appendChild(Object.assign(el("div", "empty", "ไม่มีรายการในตัวกรองนี้"), { hidden: true }));
+  });
+
+  // rail
+  var rail = document.getElementById("rail");
+  document.querySelectorAll("main > section").forEach(function (s) {
+    var a = el("a"); a.href = "#" + s.id; a.dataset.sec = s.id;
+    a.appendChild(el("span", null, s.dataset.title));
+    a.appendChild(el("span", "n", ""));
+    rail.appendChild(a);
+  });
+
+  // ── render ──
+  function effStatus(id) {
+    var s = state[id] || {};
+    if (meta[id].kind === "q") return (s.note || "").trim() ? "answered" : "";
+    return s.status || "";
+  }
+
+  function renderItem(id) {
+    var item = document.querySelector('.item[data-id="' + id + '"]');
+    var s = state[id] || {}, st = effStatus(id);
+    item.dataset.status = st;
+    item.querySelectorAll(".seg button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.v === s.status)); });
+    var ta = item.querySelector("textarea");
+    if (document.activeElement !== ta) ta.value = s.note || "";
+    var nb = item.querySelector(".notebtn");
+    if (nb) {
+      var has = !!(s.note || "").trim();
+      nb.classList.toggle("has", has);
+      nb.textContent = has ? "โน้ต •" : "โน้ต";
+      if (has || s.status === "change" || s.status === "question") { ta.hidden = false; nb.setAttribute("aria-expanded", "true"); }
+    }
+  }
+
+  function matches(id) {
+    var s = state[id] || {}, st = effStatus(id);
+    if (filter === "all") return true;
+    if (filter === "todo") return !st;
+    if (filter === "noted") return !!(s.note || "").trim();
+    return s.status === filter;
+  }
+
+  function renderAll() {
+    order.forEach(renderItem);
+    applyFilter();
+    renderStats();
+  }
+
+  function applyFilter() {
+    document.querySelectorAll(".items").forEach(function (box) {
+      var shown = 0;
+      box.querySelectorAll(".item").forEach(function (it) { var ok = matches(it.dataset.id); it.hidden = !ok; if (ok) shown++; });
+      box.querySelector(".empty").hidden = shown > 0;
+    });
+  }
+
+  function renderStats() {
+    var n = { items: 0, ok: 0, change: 0, question: 0, q: 0, ans: 0 }, per = {};
+    order.forEach(function (id) {
+      var m = meta[id], st = effStatus(id);
+      per[m.section] = per[m.section] || { t: 0, d: 0, f: 0 };
+      per[m.section].t++;
+      if (st) per[m.section].d++;
+      if (st === "change" || st === "question") per[m.section].f++;
+      if (m.kind === "q") { n.q++; if (st) n.ans++; }
+      else { n.items++; if (st) n[st]++; }
+    });
+    var done = n.ok + n.change + n.question;
+    txt("sDone", done); txt("sTotal", "/ " + n.items + " ตรวจแล้ว");
+    txt("sOk", n.ok); txt("sChange", n.change); txt("sAsk", n.question);
+    txt("sAns", n.ans); txt("sAnsT", "/ " + n.q + " คำถามที่ตอบแล้ว");
+    var total = n.items + n.q;
+    w("bOk", n.ok / total); w("bChange", n.change / total); w("bAsk", n.question / total); w("bAns", n.ans / total);
+    rail.querySelectorAll("a").forEach(function (a) {
+      var p = per[a.dataset.sec] || { t: 0, d: 0, f: 0 };
+      a.querySelector(".n").textContent = p.d + "/" + p.t;
+      a.classList.toggle("done", p.t > 0 && p.d === p.t && !p.f);
+      a.classList.toggle("flag", p.f > 0);
+    });
+  }
+  function txt(id, v) { document.getElementById(id).textContent = v; }
+  function w(id, f) { document.getElementById(id).style.width = (f * 100).toFixed(2) + "%"; }
+
+  // ── persistence ──
+  function persist(id) {
+    lsSave();
+    if (!col || readOnly) { if (!col) setSave("บันทึกในเบราว์เซอร์นี้เท่านั้น"); return; }
+    var body = { status: state[id].status || "", note: state[id].note || "", at: Date.now() };
+    setSave("กำลังบันทึก…");
+    chains[id] = (chains[id] || Promise.resolve()).then(function () {
+      return col.doc(id).set(body);
+    }).then(function () {
+      setSave("บันทึกแล้ว · Claude อ่านผลได้");
+    }).catch(function (e) {
+      if (e && e.code === "invalid_argument") { readOnly = true; setSave("คุณมีสิทธิ์ดูอย่างเดียว · บันทึกในเบราว์เซอร์นี้", true); }
+      else if (e && e.code === "quota_exceeded") { setSave("ที่เก็บเต็ม · บันทึกในเบราว์เซอร์นี้", true); }
+      else { setSave("บันทึกไม่สำเร็จ · ลองใหม่อีกครั้ง", true); }
+    });
+  }
+
+  function setStatus(id, v) {
+    state[id] = state[id] || {};
+    state[id].status = state[id].status === v ? "" : v;
+    // Items stay visible until the filter changes, so a click doesn't make them jump away
+    renderItem(id); renderStats();
+    persist(id);
+  }
+
+  // ── events ──
+  document.getElementById("main").addEventListener("click", function (ev) {
+    var b = ev.target.closest("button"); if (!b) return;
+    var item = b.closest(".item"); if (!item) return;
+    var id = item.dataset.id;
+    if (b.dataset.v) { setStatus(id, b.dataset.v); return; }
+    if (b.dataset.act === "note") {
+      var ta = item.querySelector("textarea");
+      ta.hidden = !ta.hidden; b.setAttribute("aria-expanded", String(!ta.hidden));
+      if (!ta.hidden) ta.focus();
+    }
+  });
+  document.getElementById("main").addEventListener("input", function (ev) {
+    var ta = ev.target; if (ta.tagName !== "TEXTAREA") return;
+    var id = ta.closest(".item").dataset.id;
+    state[id] = state[id] || {};
+    state[id].note = ta.value;
+    var item = ta.closest(".item");
+    item.dataset.status = effStatus(id);
+    var nb = item.querySelector(".notebtn");
+    if (nb) { var has = !!ta.value.trim(); nb.classList.toggle("has", has); nb.textContent = has ? "โน้ต •" : "โน้ต"; }
+    renderStats();
+    clearTimeout(noteTimers[id]);
+    setSave("กำลังพิมพ์…");
+    noteTimers[id] = setTimeout(function () { persist(id); }, 800);
+  });
+
+  document.querySelectorAll(".chip[data-filter]").forEach(function (c) {
+    c.addEventListener("click", function () {
+      filter = c.dataset.filter;
+      document.querySelectorAll(".chip[data-filter]").forEach(function (x) { x.setAttribute("aria-pressed", String(x === c)); });
+      applyFilter();
+    });
+  });
+
+  // ── copy summary ──
+  function summary() {
+    var lines = ["# SWIM Blueprint Review — สรุปผล (" + new Date().toLocaleDateString("th-TH") + ")", ""];
+    var c = { ok: 0, change: 0, question: 0 }, items = 0;
+    order.forEach(function (id) { if (meta[id].kind === "item") { items++; var s = (state[id] || {}).status; if (c[s] != null) c[s]++; } });
+    lines.push("ตรวจแล้ว " + (c.ok + c.change + c.question) + "/" + items + " · เห็นด้วย " + c.ok + " · ขอแก้ " + c.change + " · สงสัย " + c.question, "");
+    function block(head, pick) {
+      var rows = order.filter(pick);
+      if (!rows.length) return;
+      lines.push("## " + head);
+      rows.forEach(function (id) {
+        var m = meta[id], s = state[id] || {};
+        lines.push("- **" + id + "** " + m.title + (m.value ? " (`" + m.value + "`)" : "") + " — " + m.ref);
+        if ((s.note || "").trim()) lines.push("  - " + s.note.trim().replace(/\n+/g, "\n  - "));
+      });
+      lines.push("");
+    }
+    block("ขอแก้", function (id) { return (state[id] || {}).status === "change"; });
+    block("สงสัย", function (id) { return (state[id] || {}).status === "question"; });
+    block("คำตอบคำถามถึงองค์กร", function (id) { return meta[id].kind === "q" && ((state[id] || {}).note || "").trim(); });
+    block("เห็นด้วย พร้อมโน้ต", function (id) { var s = state[id] || {}; return s.status === "ok" && (s.note || "").trim(); });
+    block("ยังไม่ตรวจ", function (id) { return meta[id].kind === "item" && !(state[id] || {}).status; });
+    return lines.join("\n");
+  }
+  document.getElementById("copyBtn").addEventListener("click", function () {
+    var text = summary(), fb = document.getElementById("copyFallback"), btn = this;
+    function fallback() { fb.hidden = false; fb.value = text; fb.focus(); fb.select(); btn.textContent = "เลือกข้อความแล้ว · กด Ctrl/⌘+C"; }
+    try {
+      navigator.clipboard.writeText(text).then(function () {
+        fb.hidden = true; btn.textContent = "คัดลอกแล้ว";
+        setTimeout(function () { btn.textContent = "คัดลอกสรุปผลรีวิว"; }, 2000);
+      }, fallback);
+    } catch (e) { fallback(); }
+  });
+
+  // ── start ──
+  state = lsLoad();
+  renderAll();
+  setSave("บันทึกในเบราว์เซอร์นี้เท่านั้น");
+
+  (async function connect() {
+    var c = window.claude;
+    if (!c || typeof c.use !== "function") return;
+    try { db = await c.use("db"); } catch (e) { db = null; }
+    if (!db) return;
+    col = db.collection("review");
+    setSave("กำลังโหลดผลรีวิว…");
+    var timer = setTimeout(function () { setSave("ยังเชื่อมต่อที่บันทึกไม่ได้ · ผลอาจไม่ล่าสุด", true); }, 10000);
+    var first = true;
+    col.onSnapshot(function (snap) {
+      var remote = {};
+      snap.docs.forEach(function (d) { if (d.exists) remote[d.id] = d.data(); });
+      // On the first confirmed load, push anything saved only in this browser
+      if (first && !snap.metadata.fromCache) {
+        first = false; clearTimeout(timer);
+        Object.keys(state).forEach(function (id) {
+          if (meta[id] && !remote[id] && ((state[id].status) || (state[id].note || "").trim())) persist(id);
+        });
+        setSave("บันทึกแล้ว · Claude อ่านผลได้");
+      }
+      Object.keys(remote).forEach(function (id) {
+        if (!meta[id]) return;
+        var r = remote[id];
+        var ta = document.getElementById("note-" + id);
+        var typing = ta && document.activeElement === ta;
+        state[id] = { status: r.status || "", note: typing ? (state[id] || {}).note : (r.note || "") };
+      });
+      lsSave();
+      order.forEach(renderItem);
+      renderStats();
+    }, function (e) {
+      clearTimeout(timer);
+      col = null;
+      setSave("เชื่อมต่อที่บันทึกไม่ได้ · บันทึกในเบราว์เซอร์นี้", true);
+    });
+  })();
+})();
+</script>

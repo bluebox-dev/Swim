@@ -1,0 +1,336 @@
+[
+ {
+  "tool": "shutdown",
+  "params": {
+   "t": "300",
+   "msg": "IT จะปิดเครื่องนี้ กรุณาบันทึกงาน"
+  },
+  "name": "ปิดเครื่อง (5 นาที)",
+  "body": "shutdown.exe /s /t 300 /c 'IT จะปิดเครื่องนี้ กรุณาบันทึกงาน'\n'สั่งปิดเครื่องแล้ว'",
+  "timeout_s": 600
+ },
+ {
+  "tool": "shutdown",
+  "params": {
+   "t": "0",
+   "msg": "it's now"
+  },
+  "name": "ปิดเครื่อง (0 นาที)",
+  "body": "shutdown.exe /s /t 0 /c 'it''s now'\n'สั่งปิดเครื่องแล้ว'",
+  "timeout_s": 600
+ },
+ {
+  "tool": "shutdown",
+  "params": {
+   "t": "60",
+   "msg": ""
+  },
+  "name": "ปิดเครื่อง (1 นาที)",
+  "body": "shutdown.exe /s /t 60 /c ''\n'สั่งปิดเครื่องแล้ว'",
+  "timeout_s": 600
+ },
+ {
+  "tool": "abort",
+  "params": {},
+  "name": "ยกเลิกการปิด/รีบูต",
+  "body": "shutdown.exe /a\nif ($LASTEXITCODE -eq 0) { 'ยกเลิกแล้ว' } else { 'ไม่มีการปิด/รีบูตที่รออยู่' }",
+  "timeout_s": 600
+ },
+ {
+  "tool": "lock",
+  "params": {},
+  "name": "ล็อกหน้าจอ",
+  "body": "$sid = (Get-CimInstance Win32_Process -Filter \"Name='explorer.exe'\" | Select-Object -First 1).SessionId\nif ($null -eq $sid) { 'ไม่มีผู้ใช้ล็อกอินอยู่'; exit 0 }\ntsdiscon.exe $sid\n'ล็อกหน้าจอแล้ว (session ' + $sid + ')'",
+  "timeout_s": 600
+ },
+ {
+  "tool": "logoff",
+  "params": {},
+  "name": "ออกจากระบบผู้ใช้",
+  "body": "$sid = (Get-CimInstance Win32_Process -Filter \"Name='explorer.exe'\" | Select-Object -First 1).SessionId\nif ($null -eq $sid) { 'ไม่มีผู้ใช้ล็อกอินอยู่'; exit 0 }\nlogoff.exe $sid\n'ออกจากระบบแล้ว (session ' + $sid + ')'",
+  "timeout_s": 600
+ },
+ {
+  "tool": "msg",
+  "params": {
+   "sec": "300",
+   "text": "ทดสอบ it's\nสองบรรทัด"
+  },
+  "name": "ส่งข้อความถึงผู้ใช้",
+  "body": "msg.exe * /TIME:300 'ทดสอบ it''s\nสองบรรทัด'\n'ส่งข้อความแล้ว'",
+  "timeout_s": 600
+ },
+ {
+  "tool": "users",
+  "params": {},
+  "name": "ดูบัญชีผู้ใช้ในเครื่อง",
+  "body": "Get-LocalUser | Format-Table Name,Enabled,LastLogon,PasswordExpires,Description -AutoSize | Out-String -Width 220\n'--- Administrators ---'\nGet-LocalGroupMember -Group Administrators | Format-Table Name,ObjectClass,PrincipalSource -AutoSize | Out-String -Width 220",
+  "timeout_s": 600
+ },
+ {
+  "tool": "useradd",
+  "params": {
+   "user": "student1",
+   "full": "Student One",
+   "pass": "Temp-Pass'123"
+  },
+  "name": "สร้างบัญชี student1",
+  "body": "$p = ConvertTo-SecureString 'Temp-Pass''123' -AsPlainText -Force\nNew-LocalUser -Name 'student1' -FullName 'Student One' -Password $p -PasswordNeverExpires:$false | Out-Null\nAdd-LocalGroupMember -Group Users -Member 'student1' -ErrorAction SilentlyContinue\nnet.exe user 'student1' /logonpasswordchg:yes | Out-Null\n'สร้างบัญชี ' + 'student1' + ' แล้ว — ต้องเปลี่ยนรหัสผ่านตอนล็อกอินครั้งแรก'",
+  "timeout_s": 600
+ },
+ {
+  "tool": "useradd",
+  "params": {
+   "user": "adm.x",
+   "full": "",
+   "pass": "Temp-Pass-123",
+   "admin": "on"
+  },
+  "name": "สร้างบัญชี adm.x",
+  "body": "$p = ConvertTo-SecureString 'Temp-Pass-123' -AsPlainText -Force\nNew-LocalUser -Name 'adm.x' -FullName '' -Password $p -PasswordNeverExpires:$false | Out-Null\nAdd-LocalGroupMember -Group Users -Member 'adm.x' -ErrorAction SilentlyContinue\nAdd-LocalGroupMember -Group Administrators -Member 'adm.x'\nnet.exe user 'adm.x' /logonpasswordchg:yes | Out-Null\n'สร้างบัญชี ' + 'adm.x' + ' แล้ว (Administrators) — ต้องเปลี่ยนรหัสผ่านตอนล็อกอินครั้งแรก'",
+  "timeout_s": 600
+ },
+ {
+  "tool": "userpw",
+  "params": {
+   "user": "student1",
+   "pass": "Temp-Pass-123"
+  },
+  "name": "ตั้งรหัสผ่านใหม่ให้ student1",
+  "body": "$p = ConvertTo-SecureString 'Temp-Pass-123' -AsPlainText -Force\nSet-LocalUser -Name 'student1' -Password $p\nnet.exe user 'student1' /logonpasswordchg:yes | Out-Null\n'ตั้งรหัสผ่านใหม่ให้ ' + 'student1' + ' แล้ว'",
+  "timeout_s": 600
+ },
+ {
+  "tool": "userstate",
+  "params": {
+   "user": "student1",
+   "on": "1"
+  },
+  "name": "เปิดบัญชี student1",
+  "body": "Enable-LocalUser -Name 'student1'\nGet-LocalUser -Name 'student1' | Format-Table Name,Enabled -AutoSize | Out-String -Width 220",
+  "timeout_s": 600
+ },
+ {
+  "tool": "userstate",
+  "params": {
+   "user": "student1",
+   "on": "0"
+  },
+  "name": "ปิดบัญชี student1",
+  "body": "Disable-LocalUser -Name 'student1'\nGet-LocalUser -Name 'student1' | Format-Table Name,Enabled -AutoSize | Out-String -Width 220",
+  "timeout_s": 600
+ },
+ {
+  "tool": "apps",
+  "params": {},
+  "name": "ดูโปรแกรมที่ติดตั้ง",
+  "body": "$k = 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'\nGet-ItemProperty $k -ErrorAction SilentlyContinue | Where-Object DisplayName | Sort-Object DisplayName -Unique | Format-Table DisplayName,DisplayVersion,Publisher -AutoSize | Out-String -Width 220",
+  "timeout_s": 600
+ },
+ {
+  "tool": "uninstall",
+  "params": {
+   "app": "7-Zip 23"
+  },
+  "name": "ถอนโปรแกรม 7-Zip 23",
+  "body": "$k = 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'\n$apps = @(Get-ItemProperty $k -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like ('7-Zip 23' + '*') })\nif ($apps.Count -eq 0) { 'ไม่พบโปรแกรม ' + '7-Zip 23'; exit 1 }\nif ($apps.Count -gt 1) { 'พบหลายโปรแกรม ระบุชื่อให้ชัดกว่านี้:'; $apps.DisplayName; exit 1 }\n$a = $apps[0]; 'ถอน: ' + $a.DisplayName + ' ' + $a.DisplayVersion\nif ($a.PSChildName -match '^\\{[0-9A-Fa-f-]+\\}$' -and $a.UninstallString -match 'msiexec') {\n  $p = Start-Process msiexec.exe -ArgumentList '/x', $a.PSChildName, '/qn', '/norestart' -Wait -PassThru; 'msiexec exit ' + $p.ExitCode; exit $p.ExitCode\n} elseif ($a.QuietUninstallString) {\n  $p = Start-Process cmd.exe -ArgumentList '/c', $a.QuietUninstallString -Wait -PassThru; 'exit ' + $p.ExitCode; exit $p.ExitCode\n} else { 'โปรแกรมนี้ไม่มีวิธีถอนแบบเงียบ — ถอนผ่าน Remote Desktop แทน (' + $a.UninstallString + ')'; exit 1 }",
+  "timeout_s": 1800
+ },
+ {
+  "tool": "procs",
+  "params": {},
+  "name": "ดูโปรเซสที่ทำงาน",
+  "body": "Get-Process -IncludeUserName | Sort-Object WS -Descending | Select-Object -First 80 Name,Id,UserName,@{n='MB';e={[int]($_.WS/1MB)}},@{n='CPU(s)';e={[int]$_.CPU}} | Format-Table * -AutoSize | Out-String -Width 220",
+  "timeout_s": 600
+ },
+ {
+  "tool": "kill",
+  "params": {
+   "p": "4120"
+  },
+  "name": "ปิดโปรเซส 4120",
+  "body": "Stop-Process -Id 4120 -Force\n'ปิดแล้ว'",
+  "timeout_s": 600
+ },
+ {
+  "tool": "kill",
+  "params": {
+   "p": "chrome.exe"
+  },
+  "name": "ปิดโปรเซส chrome.exe",
+  "body": "$p = @(Get-Process -Name 'chrome' -ErrorAction SilentlyContinue)\nif (!$p) { 'ไม่พบโปรเซส'; exit 1 }\n$p | Stop-Process -Force\n'ปิดแล้ว ' + $p.Count + ' โปรเซส'",
+  "timeout_s": 600
+ },
+ {
+  "tool": "kill",
+  "params": {
+   "p": "notepad"
+  },
+  "name": "ปิดโปรเซส notepad",
+  "body": "$p = @(Get-Process -Name 'notepad' -ErrorAction SilentlyContinue)\nif (!$p) { 'ไม่พบโปรเซส'; exit 1 }\n$p | Stop-Process -Force\n'ปิดแล้ว ' + $p.Count + ' โปรเซส'",
+  "timeout_s": 600
+ },
+ {
+  "tool": "services",
+  "params": {},
+  "name": "ดู Service",
+  "body": "Get-Service | Sort-Object Status,Name | Format-Table Status,StartType,Name,DisplayName -AutoSize | Out-String -Width 220",
+  "timeout_s": 600
+ },
+ {
+  "tool": "service",
+  "params": {
+   "svc": "Spooler",
+   "act": "Restart",
+   "st": ""
+  },
+  "name": "รีสตาร์ต service Spooler",
+  "body": "Restart-Service -Name 'Spooler' -Force\nGet-Service -Name 'Spooler' | Format-Table Status,StartType,Name,DisplayName -AutoSize | Out-String -Width 220",
+  "timeout_s": 600
+ },
+ {
+  "tool": "service",
+  "params": {
+   "svc": "wuauserv",
+   "act": "Stop",
+   "st": "Disabled"
+  },
+  "name": "หยุด service wuauserv",
+  "body": "Set-Service -Name 'wuauserv' -StartupType Disabled\nStop-Service -Name 'wuauserv' -Force\nGet-Service -Name 'wuauserv' | Format-Table Status,StartType,Name,DisplayName -AutoSize | Out-String -Width 220",
+  "timeout_s": 600
+ },
+ {
+  "tool": "wu-check",
+  "params": {},
+  "name": "ตรวจ Windows Update",
+  "body": "$s = (New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher()\n$r = $s.Search(\"IsInstalled=0 and IsHidden=0 and Type='Software'\")\nif ($r.Updates.Count -eq 0) { 'ไม่มีอัปเดตที่ต้องติดตั้ง'; exit 0 }\n'มีอัปเดต ' + $r.Updates.Count + ' รายการ:'\nforeach ($u in $r.Updates) { ' - ' + $u.Title }",
+  "timeout_s": 1200
+ },
+ {
+  "tool": "wu-install",
+  "params": {},
+  "name": "ติดตั้ง Windows Update",
+  "body": "$ss = New-Object -ComObject Microsoft.Update.Session\n$r = $ss.CreateUpdateSearcher().Search(\"IsInstalled=0 and IsHidden=0 and Type='Software'\")\nif ($r.Updates.Count -eq 0) { 'ไม่มีอัปเดตที่ต้องติดตั้ง'; exit 0 }\n$c = New-Object -ComObject Microsoft.Update.UpdateColl\nforeach ($u in $r.Updates) { if (-not $u.EulaAccepted) { $u.AcceptEula() }; [void]$c.Add($u); ' - ' + $u.Title }\n$d = $ss.CreateUpdateDownloader(); $d.Updates = $c; [void]$d.Download()\n$i = $ss.CreateUpdateInstaller(); $i.Updates = $c; $res = $i.Install()\n'ผลการติดตั้ง: ' + @('ยังไม่เริ่ม','กำลังทำ','สำเร็จ','สำเร็จบางส่วน','ล้มเหลว','ยกเลิก')[$res.ResultCode]\nif ($res.RebootRequired) { 'ต้องรีบูตเครื่องเพื่อให้อัปเดตมีผล' }",
+  "timeout_s": 3600
+ },
+ {
+  "tool": "rename",
+  "params": {
+   "nn": "lab-01"
+  },
+  "name": "เปลี่ยนชื่อเครื่องเป็น lab-01",
+  "body": "Rename-Computer -NewName 'LAB-01' -Force -ErrorAction Stop\n'เปลี่ยนชื่อเป็น LAB-01 แล้ว — มีผลหลังรีบูต'",
+  "timeout_s": 600
+ },
+ {
+  "tool": "rename",
+  "params": {
+   "nn": "LAB-02",
+   "rb": "on"
+  },
+  "name": "เปลี่ยนชื่อเครื่องเป็น LAB-02",
+  "body": "Rename-Computer -NewName 'LAB-02' -Force -ErrorAction Stop\n'เปลี่ยนชื่อเป็น LAB-02 แล้ว — มีผลหลังรีบูต'\nshutdown.exe /r /t 60 /c 'IT เปลี่ยนชื่อเครื่อง เครื่องจะรีสตาร์ตใน 1 นาที'",
+  "timeout_s": 600
+ },
+ {
+  "tool": "time",
+  "params": {
+   "tz": "SE Asia Standard Time",
+   "sync": "on"
+  },
+  "name": "ตั้งเวลา · SE Asia Standard Time",
+  "body": "Set-TimeZone -Id 'SE Asia Standard Time'\nStart-Service w32time -ErrorAction SilentlyContinue\nw32tm.exe /resync /force\n'โซนเวลา: ' + (Get-TimeZone).DisplayName\n'เวลาเครื่อง: ' + (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')",
+  "timeout_s": 600
+ },
+ {
+  "tool": "time",
+  "params": {
+   "tz": ""
+  },
+  "name": "ตั้งเวลา",
+  "body": "'โซนเวลา: ' + (Get-TimeZone).DisplayName\n'เวลาเครื่อง: ' + (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')",
+  "timeout_s": 600
+ },
+ {
+  "tool": "time",
+  "params": {
+   "tz": "UTC"
+  },
+  "name": "ตั้งเวลา · UTC",
+  "body": "Set-TimeZone -Id 'UTC'\n'โซนเวลา: ' + (Get-TimeZone).DisplayName\n'เวลาเครื่อง: ' + (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')",
+  "timeout_s": 600
+ },
+ {
+  "tool": "rdp-off",
+  "params": {},
+  "name": "ปิด Remote Desktop",
+  "body": "Set-ItemProperty 'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server' -Name fDenyTSConnections -Value 1\nGet-NetFirewallRule -Group '@FirewallAPI.dll,-28752' | Set-NetFirewallRule -Enabled False\n$deny = (Get-ItemProperty 'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server').fDenyTSConnections\n$open = @(Get-NetFirewallRule -Group '@FirewallAPI.dll,-28752' -Direction Inbound | Where-Object Enabled -eq 'True').Count\n$acct = Get-LocalUser -Name 'swim-remote' -ErrorAction SilentlyContinue\nif ($acct -and $acct.Enabled) { Disable-LocalUser -Name 'swim-remote' }\n'Remote Desktop: ' + $(if ($deny -eq 1) { 'ปิดแล้ว' } else { 'ยังเปิดอยู่' })\n'กฎ firewall ที่ยังเปิด: ' + $open\n'บัญชี swim-remote: ' + $(if (-not $acct) { 'ไม่มี' } else { 'ปิดใช้งานแล้ว' })\nif ($deny -ne 1 -or $open -gt 0) { exit 1 }",
+  "timeout_s": 600
+ },
+ {
+  "tool": "ipconfig",
+  "params": {},
+  "name": "ipconfig /all",
+  "body": "ipconfig.exe /all",
+  "timeout_s": 600
+ },
+ {
+  "tool": "ping",
+  "params": {
+   "to": "8.8.8.8",
+   "port": ""
+  },
+  "name": "ทดสอบการเชื่อมต่อไป 8.8.8.8",
+  "body": "Test-NetConnection -ComputerName '8.8.8.8' -InformationLevel Detailed | Out-String -Width 200",
+  "timeout_s": 600
+ },
+ {
+  "tool": "ping",
+  "params": {
+   "to": "swim.corp.local",
+   "port": "443"
+  },
+  "name": "ทดสอบการเชื่อมต่อไป swim.corp.local",
+  "body": "Test-NetConnection -ComputerName 'swim.corp.local' -Port 443 -InformationLevel Detailed | Out-String -Width 200",
+  "timeout_s": 600
+ },
+ {
+  "tool": "dns",
+  "params": {},
+  "name": "ล้าง DNS cache",
+  "body": "ipconfig.exe /flushdns",
+  "timeout_s": 600
+ },
+ {
+  "tool": "disk",
+  "params": {},
+  "name": "ดูพื้นที่ดิสก์",
+  "body": "Get-Volume | Where-Object DriveLetter | Select-Object DriveLetter,FileSystemLabel,FileSystem,@{n='Size(GB)';e={[math]::Round($_.Size/1GB,1)}},@{n='Free(GB)';e={[math]::Round($_.SizeRemaining/1GB,1)}} | Format-Table * -AutoSize | Out-String -Width 220",
+  "timeout_s": 600
+ },
+ {
+  "tool": "temp",
+  "params": {},
+  "name": "ล้างไฟล์ชั่วคราว",
+  "body": "$before = (Get-PSDrive C).Free\n$dirs = @(\"$env:SystemRoot\\Temp\") + @(Get-ChildItem 'C:\\Users' -Directory -ErrorAction SilentlyContinue | ForEach-Object { Join-Path $_.FullName 'AppData\\Local\\Temp' })\nforeach ($d in $dirs) { if (Test-Path $d) { Get-ChildItem $d -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue } }\n'คืนพื้นที่ได้ ' + [math]::Round(((Get-PSDrive C).Free - $before)/1MB) + ' MB'",
+  "timeout_s": 1800
+ },
+ {
+  "tool": "hiber",
+  "params": {
+   "on": "off"
+  },
+  "name": "Hibernate off",
+  "body": "powercfg.exe /h off\n'Hibernate: ปิดแล้ว'",
+  "timeout_s": 600
+ },
+ {
+  "tool": "hiber",
+  "params": {
+   "on": "on"
+  },
+  "name": "Hibernate on",
+  "body": "powercfg.exe /h on\n'Hibernate: เปิดแล้ว'",
+  "timeout_s": 600
+ }
+]

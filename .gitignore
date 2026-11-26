@@ -1,0 +1,28 @@
+# ── secrets: never commit ──
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.cer
+*.pfx
+*.p12
+*.credentials
+
+# ── build output and local data ──
+.build/
+*.exe
+*.msi
+*.wim
+*.iso
+*.qcow2
+*.img
+node_modules/
+
+# ── editor / OS ──
+.DS_Store
+.idea/
+.vscode/
+.claude/
+*.swp

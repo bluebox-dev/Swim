@@ -1,0 +1,5 @@
+# Sent with every answer. (.inc, not .conf: nginx loads conf.d/*.conf at http level on its own.)
+add_header Strict-Transport-Security "max-age=31536000" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header Referrer-Policy "no-referrer" always;
+add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;

@@ -1,0 +1,129 @@
+# SWIM server stack (spec 01 §3). Run from builder-infra/:  docker compose up -d --build
+name: swim
+
+services:
+  postgres:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: swim_owner
+      POSTGRES_PASSWORD: ${PG_OWNER_PASSWORD:?run scripts/setup-host.sh}
+      POSTGRES_DB: swim
+      SWIM_APP_PASSWORD: ${PG_APP_PASSWORD:?run scripts/setup-host.sh}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init-roles.sh:/docker-entrypoint-initdb.d/10-init-roles.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U swim_owner -d swim"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [internal]
+
+  backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    image: swim/backend:dev
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      MIGRATE_DSN: postgres://swim_owner:${PG_OWNER_PASSWORD}@postgres:5432/swim?sslmode=disable
+      DATABASE_URL: postgres://swim_app:${PG_APP_PASSWORD}@postgres:5432/swim?sslmode=disable
+      SWIM_ADMIN_TOKENS: ${SWIM_ADMIN_TOKENS:?run scripts/setup-host.sh}
+      SWIM_STORAGE: /storage
+      SWIM_MANIFEST_KEY: /keys/manifest-ed25519.pem
+      SWIM_LIBVIRT_URI: qemu:///system
+      GUAC_JSON_SECRET: ${GUAC_JSON_SECRET:?run scripts/setup-host.sh}
+      SWIM_HEARTBEAT_S: "60"             # lab value; spec default is 300
+    ports:
+      - "127.0.0.1:8090:8080"          # only nginx (host network) talks to it
+    volumes:
+      - ${SWIM_DATA:-/srv/swim}/storage:/storage
+      - ${SWIM_DATA:-/srv/swim}/keys:/keys
+      - ${SWIM_DATA:-/srv/swim}/certs/server.crt:/certs/server.crt:ro
+      - /srv/swim/vms:/srv/swim/vms:ro   # same path as libvirt sees it
+      - /var/run/libvirt:/var/run/libvirt
+      - ${SWIM_DATA:-/srv/swim}/run:/run/swim   # waker.sock (Wake-on-LAN)
+      - ${SWIM_DATA:-/srv/swim}/audit-archive:/audit-archive   # archived activity log (not served by nginx)
+    networks: [internal]
+
+  # Wake-on-LAN sender: the only thing on the host network, so its broadcasts reach the
+  # LAN. No ports — the backend talks to it over a Unix socket in /srv/swim/run.
+  waker:
+    image: swim/backend:dev
+    command: ["waker"]
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      backend: { condition: service_started }
+    volumes:
+      - ${SWIM_DATA:-/srv/swim}/run:/run/swim
+
+  # Privileged task worker: VM snapshots + WIM capture (qemu-nbd needs /dev/nbd*).
+  # No ports; talks only to postgres and the libvirt socket.
+  builder:
+    image: swim/backend:dev
+    command: ["builder"]
+    restart: unless-stopped
+    privileged: true
+    depends_on:
+      backend: { condition: service_started }
+    environment:
+      MIGRATE_DSN: postgres://swim_owner:${PG_OWNER_PASSWORD}@postgres:5432/swim?sslmode=disable
+      DATABASE_URL: postgres://swim_app:${PG_APP_PASSWORD}@postgres:5432/swim?sslmode=disable
+      SWIM_STORAGE: /storage
+      SWIM_LIBVIRT_URI: qemu:///system
+    volumes:
+      - ${SWIM_DATA:-/srv/swim}/storage:/storage
+      - /srv/swim/vms:/srv/swim/vms
+      - /var/lib/libvirt:/var/lib/libvirt
+      - /var/run/libvirt:/var/run/libvirt
+      - /dev:/dev
+    networks: [internal]
+
+  nginx:
+    image: nginx:1.30-alpine
+    restart: unless-stopped
+    depends_on: [backend, guacamole]
+    network_mode: host                 # reaches backend (127.0.0.1:8090) and guacamole (127.0.0.1:8080)
+    volumes:
+      - ./nginx:/etc/nginx/conf.d:ro   # whole dir: rsync replaces files, a single-file mount goes stale
+      - ${SWIM_DATA:-/srv/swim}/certs:/etc/nginx/certs:ro
+      - ../frontend:/usr/share/nginx/html:ro
+      - ${SWIM_DATA:-/srv/swim}/storage:/storage:ro
+
+  # Guacamole proxy for VM consoles (Builder UI, phase 5). Host network so it can
+  # reach QEMU VNC sockets bound to 127.0.0.1 on the host.
+  guacd:
+    image: guacamole/guacd:1.6.0
+    restart: unless-stopped
+    network_mode: host
+    # entrypoint (not command): the 1.6 image's own entrypoint forces "-b 0.0.0.0"; guacd must
+    # listen on this machine only
+    entrypoint: ["/opt/guacamole/sbin/guacd", "-b", "127.0.0.1", "-L", "info", "-f"]
+
+  # Guacamole web client. Auth = JSON extension only: the backend hands out short-lived
+  # encrypted+signed connection links (no Guacamole users/database). Tomcat listens on
+  # host :8080; ufw blocks it from outside, nginx proxies /guacamole/.
+  guacamole:
+    image: guacamole/guacamole:1.6.0
+    restart: unless-stopped
+    network_mode: host
+    depends_on: [guacd]
+    environment:
+      GUACD_HOSTNAME: 127.0.0.1
+      GUACD_PORT: "4822"
+      JSON_SECRET_KEY: ${GUAC_JSON_SECRET:?run scripts/setup-host.sh}
+      # 1.6 blocks an address after 5 failed sign-ins. Behind nginx every request comes from
+      # 127.0.0.1, so take the real address from X-Forwarded-For — otherwise one person's
+      # expired link could lock everybody out.
+      REMOTE_IP_VALVE_ENABLED: "true"
+      PROXY_ALLOWED_IPS_REGEX: '127\.0\.0\.1'
+
+volumes:
+  pgdata:
+
+networks:
+  internal:
